@@ -1,0 +1,17 @@
+# macOS y Python (render de la rampa)
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+
+# Simulación
+sim/.cache/
+sim/out/
+
+# Android / Gradle (el SDK trae además su propio robot/.gitignore)
+robot/.gradle/
+robot/build/
+robot/*/build/
+robot/local.properties
+robot/.idea/
+*.iml
