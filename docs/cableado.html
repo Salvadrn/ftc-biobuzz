@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Cableado BIOBUZZ</title>
+<style>
+  :root {
+    --text-primary: #1a1a1a;
+    --text-secondary: #5b5b5b;
+    --surface-1: #ffffff;
+    --border: #dedbd3;
+    --bg: #f6f5f1;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* Paleta de roles (estilo.md). En modo claro la tinta es el hex exacto. */
+    --ink-sig: #8a6d00;   /* señal que se mide: encoders */
+    --ink-pow: #1f5e8b;   /* potencia: 12 V, 5 V */
+    --ink-act: #7a2f2f;   /* actuadores: motores, servos */
+    --ink-ok: #1e7d32;    /* correcto, valor que cabe, módulo protagonista */
+    --ink-bad: #b3261e;   /* peligro */
+    --ink-data: #6b3fa0;  /* buses: USB, I2C, RS485 */
+    --gnd: #1a1a1a;       /* tierra: siempre tinta neutra, nunca de color */
+    --off: #9e9e9e;       /* sin usar / sin confirmar */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --text-primary: #ecebe7;
+      --text-secondary: #a9a8a2;
+      --surface-1: #1f1f1d;
+      --border: #3a3a37;
+      --bg: #151514;
+      /* EXCEPCIÓN a estilo.md ("solo los acentos son fijos", "GND siempre negro").
+         Contraste WCAG de cada hex exacto sobre --surface-1 oscuro (#1f1f1d):
+         sig 3.36 · pow 2.38 · act 1.79 · ok 3.17 · bad 2.53 · data 2.24 · gnd 1.05.
+         Todos quedan bajo 4.5:1 y GND sería invisible, así que en oscuro cada rol
+         usa el mismo tono aclarado (6.0–13.8:1). Los rellenos siguen saliendo del
+         trazo con color-mix, sin reglas duplicadas. Si se quiere evitar la excepción,
+         el cambio va en estilo.md, no aquí. */
+      --ink-sig: #bfaf73;
+      --ink-pow: #8faec5;
+      --ink-act: #c79a9a;
+      --ink-ok: #83b88e;
+      --ink-bad: #e0827c;
+      --ink-data: #b59fd0;
+      --gnd: #ecebe7;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg, #f6f5f1);
+    color: var(--text-primary, #1a1a1a);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-weight: 400;
+  }
+  h1, h2, h3, h4, th, b, strong { font-weight: 500; }
+  a { color: var(--ink-pow); }
+  code { font-family: var(--font-mono); font-size: 13px; }
+
+  .hoja { max-width: 1320px; margin: 0 auto; padding: 28px 20px 64px; overflow-wrap: anywhere; }
+  .meta { font-size: 12px; color: var(--text-secondary, #5b5b5b); margin-bottom: 8px; }
+  h1 { font-size: 22px; margin: 0 0 8px; line-height: 1.3; }
+  .sub { color: var(--text-secondary, #5b5b5b); font-size: 14px; line-height: 1.6; max-width: 900px; margin: 0 0 14px; }
+  .aviso {
+    font-size: 13px; line-height: 1.55; max-width: 900px;
+    border-left: 3px solid var(--off); padding: 6px 12px; color: var(--text-secondary, #5b5b5b);
+    margin-bottom: 26px;
+  }
+  h2 { font-size: 16px; letter-spacing: .04em; margin: 0 0 12px; }
+  h2 .nota { font-size: 12px; letter-spacing: 0; color: var(--text-secondary); font-weight: 400; margin-left: 6px; }
+  section { margin-top: 36px; }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; }
+  @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+  .card { background: var(--surface-1, #fff); border: 1px solid var(--border, #dedbd3); border-radius: 10px; padding: 18px; }
+  .card + .card { margin-top: 18px; }
+  .cols > .card + .card { margin-top: 0; }
+  .cap { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-top: 10px; }
+  svg { display: block; width: 100%; height: auto; }
+  /* Los SVG miden 560 de ancho en su viewBox: si se dibujan más angostos, las etiquetas de 12
+     bajan de 12 px. Por eso nunca se encogen de 560 px; si no caben, se deslizan dentro de su
+     tarjeta (la página no gana scroll horizontal). La fila de dibujos pasa a una columna
+     antes de que cada columna quede más angosta que 560 px. */
+  .lienzo { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .lienzo svg { min-width: 560px; max-width: 680px; margin: 0 auto; }
+  @media (max-width: 1299px) { .cols-dibujo { grid-template-columns: minmax(0, 1fr); } }
+  .solo-angosto { display: none; }
+  @media (max-width: 640px) { .solo-angosto { display: block; } }
+  @media (max-width: 480px) {
+    .hoja { padding: 20px 12px 48px; }
+    .card { padding: 12px; }
+  }
+
+  /* ---------- roles ---------- */
+  .k-pow  { --c: var(--ink-pow); }
+  .k-act  { --c: var(--ink-act); }
+  .k-sig  { --c: var(--ink-sig); }
+  .k-data { --c: var(--ink-data); }
+  .k-ok   { --c: var(--ink-ok); }
+  .k-bad  { --c: var(--ink-bad); }
+  .k-gnd  { --c: var(--gnd); }
+  .k-off  { --c: var(--off); }
+
+  .leyenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+  .leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+  .leyenda i { width: 14px; height: 14px; border-radius: 3px; background: var(--c); display: inline-block; }
+
+  /* ---------- tiras de puertos ---------- */
+  .hubname { font-size: 14px; font-weight: 500; margin: 0 0 4px; }
+  .hubname .sec { color: var(--text-secondary); font-weight: 400; font-size: 12px; }
+  .lado { font-size: 12px; color: var(--text-secondary); margin: 12px 0 6px; }
+  .strip {
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 8px;
+    padding: 10px 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  }
+  .pin { display: flex; flex-direction: column; align-items: center; width: 22px; }
+  .pin .bar { width: 8px; height: 26px; border-radius: 2px; background: var(--c); }
+  .pin.enc .bar { width: 5px; height: 18px; margin-top: 8px; }
+  .pin .lbl { writing-mode: vertical-rl; font-size: 12px; color: var(--c); margin-top: 6px; white-space: nowrap; line-height: 1; }
+  .pin.sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 2px; }
+
+  /* ---------- a dónde va cada puerto ---------- */
+  .row {
+    display: grid; grid-template-columns: 22px 108px minmax(0, 1fr); gap: 10px 12px;
+    align-items: start; padding: 11px 0; border-top: 1px solid var(--border);
+  }
+  .row:first-of-type { border-top: 0; }
+  .chip { width: 22px; height: 22px; border-radius: 4px; background: var(--c); margin-top: 1px; }
+  .k-off .chip { background: transparent; border: 2px dashed var(--off); }
+  .port { font-weight: 500; color: var(--c); font-size: 14px; line-height: 1.4; }
+  .dest { font-weight: 500; font-size: 14px; line-height: 1.4; }
+  .k-off .dest { color: var(--text-secondary); }
+  .why { font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin-top: 3px; }
+  .pend { color: var(--off); font-size: 12px; }
+  @media (max-width: 480px) { .row { grid-template-columns: 22px 84px minmax(0, 1fr); gap: 8px 10px; } }
+
+  /* ---------- callouts ---------- */
+  .callouts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 900px) { .callouts { grid-template-columns: minmax(0, 1fr); } }
+  .callout { border: 2px solid var(--c); border-radius: 8px; padding: 18px 20px; background: var(--surface-1, #fff); }
+  .callout h3 { color: var(--c); font-size: 15px; margin: 0 0 10px; line-height: 1.4; }
+  .callout p { font-size: 14px; line-height: 1.6; margin: 0 0 8px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .ref { font-size: 12px; color: var(--text-secondary); }
+
+  /* ---------- tabla DS ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; color: var(--text-secondary); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td code { font-size: 14px; font-weight: 500; }
+  td .pend { display: block; }
+  .ob { color: var(--ink-ok); }
+  .op { color: var(--text-secondary); }
+  @media (max-width: 680px) {
+    table, thead, tbody, tr, td { display: block; }
+    thead { display: none; }
+    tr { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; margin-bottom: 10px; }
+    td { border: 0; padding: 4px 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; }
+    td::before { content: attr(data-l); font-size: 12px; color: var(--text-secondary); }
+  }
+
+  /* ---------- listas ---------- */
+  ol.checks { margin: 0; padding-left: 22px; }
+  ol.checks li { margin-bottom: 10px; line-height: 1.55; }
+  ol.checks li .why { margin-top: 2px; }
+  ol.checks li.rojo { border-left: 3px solid var(--ink-bad); padding-left: 8px; margin-left: -11px; }
+  ol.checks li.rojo > b:first-child { color: var(--ink-bad); }
+  ul.sinconf { margin: 0; padding: 0; list-style: none; }
+  ul.sinconf li { padding: 7px 0 7px 18px; border-top: 1px solid var(--border); position: relative; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+  ul.sinconf li:first-child { border-top: 0; }
+  ul.sinconf li::before { content: ""; position: absolute; left: 2px; top: 13px; width: 8px; height: 8px; border-radius: 50%; border: 2px dashed var(--off); }
+  ul.sinconf b { color: var(--text-primary); }
+  .fuentes { font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+  .fuentes a { overflow-wrap: anywhere; }
+
+  /* ---------- SVG ---------- */
+  svg text { font-family: var(--font-sans); fill: var(--text-primary); }
+  .t12 { font-size: 12px; } .t13 { font-size: 13px; } .t14 { font-size: 14px; }
+  .m { font-weight: 500; } .c { text-anchor: middle; } .e { text-anchor: end; }
+  .sec { fill: var(--text-secondary); }
+  .i-pow { fill: var(--ink-pow); } .i-act { fill: var(--ink-act); } .i-sig { fill: var(--ink-sig); }
+  .i-data { fill: var(--ink-data); } .i-ok { fill: var(--ink-ok); } .i-bad { fill: var(--ink-bad); } .i-off { fill: var(--off); }
+  .w { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .w-pow { stroke: var(--ink-pow); } .w-act { stroke: var(--ink-act); } .w-sig { stroke: var(--ink-sig); }
+  .w-data { stroke: var(--ink-data); } .w-gnd { stroke: var(--gnd); } .w-sec { stroke: var(--text-secondary); stroke-width: 1.5; }
+  .w-off { stroke: var(--off); stroke-dasharray: 5 4; }
+  .bx { stroke-width: 1.5; }
+  .bx-ok   { fill: #e6f4ea; fill: color-mix(in srgb, var(--ink-ok) 10%, transparent);   stroke: var(--ink-ok); }
+  .bx-pow  { fill: #e8f1f7; fill: color-mix(in srgb, var(--ink-pow) 12%, transparent);  stroke: var(--ink-pow); }
+  .bx-act  { fill: #f7ecec; fill: color-mix(in srgb, var(--ink-act) 12%, transparent);  stroke: var(--ink-act); }
+  .bx-data { fill: #f1ebf8; fill: color-mix(in srgb, var(--ink-data) 12%, transparent); stroke: var(--ink-data); }
+  .bx-off  { fill: none; stroke: var(--off); stroke-dasharray: 6 4; }
+  .bx-neu  { fill: none; stroke: var(--text-secondary); }
+  .zone    { fill: none; stroke: var(--ink-act); stroke-dasharray: 7 5; stroke-width: 1.5; }
+  .f-pow { fill: var(--ink-pow); } .f-act { fill: var(--ink-act); } .f-data { fill: var(--ink-data); }
+  .f-off { fill: var(--off); } .f-sec { fill: var(--text-secondary); } .f-gnd { fill: var(--gnd); }
+</style>
+</head>
+<body>
+<main class="hoja">
+
+  <div class="meta">ftc-biobuzz · docs/cableado.html · SDK 12.0 · hoja v2, 2026-09-24</div>
+  <h1>¿Cómo se conecta el robot BIOBUZZ?</h1>
+  <p class="sub">
+    Qué va en cada puerto del Control Hub y del Expansion Hub y por qué, por qué la torreta y el hood
+    no pueden compartir par de servos, a qué USB va el Limelight y cómo evitar que su cable se jale cuando gira la torreta,
+    hacia dónde tiene que apuntar el hub para que la IMU no mienta, y qué nombre exacto escribir en la Driver Station.
+  </p>
+  <div class="aviso">
+    <b>Nada de esta hoja se ha medido en el robot físico.</b> Sale de la documentación de REV, Limelight y FIRST, del
+    manual BIOBUZZ (V1 / TU01) y del código de <code>robot/TeamCode</code>. Lo que está en gris punteado no está confirmado
+    contra la pieza: modelos de servo y motor, si ya tienen Expansion Hub y si va a existir <code>flywheel2</code>.
+  </div>
+
+  <!-- ================================================================ -->
+  <div class="cols cols-dibujo">
+
+    <!-- ---------------- columna izquierda: cómo se ve el hub ---------------- -->
+    <div>
+      <h2>ASÍ SE VE EL HUB <span class="nota">visto desde arriba, logo hacia arriba</span></h2>
+      <div class="card">
+        <div class="lienzo">
+        <svg viewBox="0 0 560 318" role="img" aria-label="Mapa del Control Hub: qué puertos hay en cada lado">
+          <text x="280" y="18" class="t13 m c">↑ FRENTE DEL ROBOT</text>
+          <text x="280" y="35" class="t12 c sec">Robot.java: logo arriba, borde de USB al frente</text>
+
+          <rect x="140" y="66" width="280" height="200" rx="10" class="bx bx-neu"/>
+
+          <!-- borde de arriba, visto DESDE ARRIBA (espejo de la foto de frente de ftc-docs):
+               microSD en la esquina de los XT30, los dos USB-A en la de UART/RS485.
+               El Mini USB queda debajo del USB-C, en la misma cara: desde arriba no se ve. -->
+          <text x="224" y="60" class="t12 c i-off">SD</text>
+          <text x="262" y="60" class="t12 c i-off">HDMI</text>
+          <text x="300" y="60" class="t12 c i-off">C</text>
+          <text x="336" y="60" class="t12 c m i-data">3.0</text>
+          <text x="372" y="60" class="t12 c i-off">2.0</text>
+          <rect x="212" y="70" width="24" height="5" rx="1" class="f-off"/>
+          <rect x="247" y="70" width="30" height="10" rx="2" class="f-off"/>
+          <rect x="291" y="70" width="18" height="8" rx="3" class="f-off"/>
+          <rect x="323" y="70" width="26" height="12" rx="2" class="f-data"/>
+          <rect x="359" y="70" width="26" height="12" rx="2" class="f-off"/>
+
+          <!-- lado izquierdo: los dos XT30 lado a lado, luego motores -->
+          <rect x="144" y="84" width="10" height="18" rx="2" class="f-pow"/>
+          <rect x="157" y="84" width="10" height="18" rx="2" class="f-pow"/>
+          <rect x="144" y="110" width="18" height="22" rx="2" class="f-act"/>
+          <rect x="144" y="140" width="18" height="22" rx="2" class="f-act"/>
+          <rect x="144" y="170" width="18" height="22" rx="2" class="f-act"/>
+          <rect x="144" y="200" width="18" height="22" rx="2" class="f-act"/>
+          <text x="134" y="97" class="t12 e i-pow">XT30 ×2</text>
+          <text x="134" y="125" class="t12 e i-act">motor 0 + enc 0</text>
+          <text x="134" y="155" class="t12 e i-act">motor 1 + enc 1</text>
+          <text x="134" y="185" class="t12 e i-act">motor 2 + enc 2</text>
+          <text x="134" y="215" class="t12 e i-act">motor 3 + enc 3</text>
+
+          <!-- borde de abajo: servos 0-5 y +5V x2 -->
+          <rect x="190" y="248" width="20" height="12" rx="2" class="f-act"/>
+          <rect x="216" y="248" width="20" height="12" rx="2" class="f-off"/>
+          <rect x="242" y="248" width="20" height="12" rx="2" class="f-act"/>
+          <rect x="268" y="248" width="20" height="12" rx="2" class="f-off"/>
+          <rect x="294" y="248" width="20" height="12" rx="2" class="f-off"/>
+          <rect x="320" y="248" width="20" height="12" rx="2" class="f-off"/>
+          <rect x="346" y="248" width="20" height="12" rx="2" class="f-off"/>
+          <rect x="372" y="248" width="20" height="12" rx="2" class="f-off"/>
+          <text x="200" y="283" class="t12 c i-act">0</text>
+          <text x="226" y="283" class="t12 c i-off">1</text>
+          <text x="252" y="283" class="t12 c i-act">2</text>
+          <text x="278" y="283" class="t12 c i-off">3</text>
+          <text x="304" y="283" class="t12 c i-off">4</text>
+          <text x="330" y="283" class="t12 c i-off">5</text>
+          <text x="356" y="283" class="t12 c i-off">+5</text>
+          <text x="382" y="283" class="t12 c i-off">+5</text>
+          <text x="291" y="303" class="t12 c sec">servos 0 → 5, luego +5V ×2 (sin guía: se pueden poner al revés)</text>
+
+          <!-- lado derecho -->
+          <rect x="398" y="74" width="18" height="14" rx="2" class="f-off"/>
+          <rect x="398" y="92" width="18" height="8" rx="2" class="f-sec"/>
+          <rect x="398" y="104" width="18" height="14" rx="2" class="f-data"/>
+          <rect x="398" y="122" width="18" height="36" rx="2" class="f-off"/>
+          <rect x="398" y="162" width="18" height="44" rx="2" class="f-off"/>
+          <rect x="398" y="210" width="18" height="22" rx="2" class="f-off"/>
+          <text x="426" y="85" class="t12 i-off">UART ×2</text>
+          <text x="426" y="100" class="t12 sec">LED · botón</text>
+          <text x="426" y="115" class="t12 i-data">RS485 ×2</text>
+          <text x="426" y="145" class="t12 i-off">I2C 3·2·1·0</text>
+          <text x="426" y="189" class="t12 i-off">digital 6-7…0-1</text>
+          <text x="426" y="226" class="t12 i-off">analógico 2-3·0-1</text>
+
+          <!-- cara -->
+          <text x="280" y="140" class="t13 m c">logo REV hacia arriba</text>
+          <text x="280" y="157" class="t12 c sec">(la cara con el nombre del hub)</text>
+
+          <!-- ejes del hub del driver IMU universal (SDK 8.1+, el que usa Robot.java), según ftc-docs:
+               +Y hacia los USB, +X hacia los sensores de la derecha. Con logo UP y USB FORWARD
+               coinciden con los ejes del robot. El BNO055IMU viejo usaba otros (X a USB, Y a motores). -->
+          <path d="M196 226 L196 194" class="w w-sec"/>
+          <path d="M191 199 L196 192 L201 199" class="w w-sec"/>
+          <path d="M196 226 L228 226" class="w w-sec"/>
+          <path d="M223 221 L230 226 L223 231" class="w w-sec"/>
+          <text x="204" y="198" class="t12 sec">+Y</text>
+          <text x="234" y="230" class="t12 sec">+X</text>
+
+          <!-- chip de la IMU: 83 mm del borde de motores, 35 mm del de servos -->
+          <circle cx="302" cy="198" r="5" class="f-data"/>
+          <text x="312" y="202" class="t12 i-data">IMU</text>
+        </svg>
+        </div>
+        <div class="cap solo-angosto">En pantalla angosta el dibujo es más ancho que la tarjeta: deslízalo de lado. Todo lo que dice también está en las listas de abajo.</div>
+        <div class="cap">
+          Los lados izquierdo, derecho y de abajo salen del pinout de REV. El borde de arriba sale de la foto de frente de ftc-docs,
+          volteada porque aquí lo ves desde arriba: el microSD queda en la esquina de los XT30 y los dos USB-A en la de UART/RS485,
+          con el <b>3.0 (azul)</b> entre el USB-C y el 2.0. Compruébalo también por el color: el del Limelight es el azul.
+          La IMU está a 83 mm del borde de motores y a 35 mm del de servos. Los ejes dibujados son los del driver IMU del SDK
+          (ftc-docs): +Y hacia los USB y +X hacia los sensores; con logo arriba y USB al frente coinciden con los del robot.
+          El Expansion Hub tiene los mismos puertos en el mismo lugar, pero sin USB-A, USB-C ni HDMI: solo un Mini USB
+          <span class="pend">(dónde queda: confirmar contra la pieza)</span>.
+        </div>
+      </div>
+
+      <h2 style="margin-top:28px">TIRA DE PUERTOS <span class="nota">en el orden físico de cada lado</span></h2>
+
+      <div class="card">
+        <div class="hubname">Control Hub <span class="sec">REV-31-1595</span></div>
+
+        <div class="lado">Lado izquierdo · arriba, los dos XT30 lado a lado; luego, de arriba hacia abajo, cada motor con su encoder justo debajo (mismo número)</div>
+        <div class="strip">
+          <div class="pin k-pow"><span class="bar"></span><span class="lbl">XT30 M ← switch</span></div>
+          <div class="pin k-pow"><span class="bar"></span><span class="lbl">XT30 H → EH</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">M0 frontLeft</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E0 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">M1 frontRight</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E1 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">M2 backLeft</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E2 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">M3 backRight</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E3 libre</span></div>
+        </div>
+
+        <div class="lado">Borde de abajo, de izquierda a derecha · pares 0-1, 2-3, 4-5</div>
+        <div class="strip">
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">S0 turret</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S1 vacío</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">S2 hood</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S3 vacío</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S4 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S5 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">+5V libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">+5V libre</span></div>
+        </div>
+
+        <div class="lado">Lado derecho, de arriba hacia abajo</div>
+        <div class="strip">
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">UART no</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">UART no</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-data"><span class="bar"></span><span class="lbl">RS485 → EH</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">RS485 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 3 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 2 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 1 libre</span></div>
+          <div class="pin k-data"><span class="bar"></span><span class="lbl">I2C 0 IMU</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 6-7 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 4-5 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 2-3 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 0-1 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">A 2-3 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">A 0-1 reserva</span></div>
+        </div>
+
+        <div class="lado">Borde de arriba, parado frente a los USB, de izquierda a derecha · los XT30 te quedan a la derecha (foto de ftc-docs)</div>
+        <div class="strip">
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">USB-A 2.0 no</span></div>
+          <div class="pin k-data"><span class="bar"></span><span class="lbl">USB-A 3.0 LL</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">USB-C laptop</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">Mini USB, bajo el C</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">HDMI no</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">microSD no</span></div>
+        </div>
+        <div class="cap">
+          Cada hub trae un XT30 macho y uno hembra, uno al lado del otro. Cuál de los dos (izquierdo o derecho) es el macho:
+          <span class="pend">confírmalo mirando los contactos metálicos, no la carcasa</span> (así lo define REV).
+          El Mini USB está en la misma cara, justo debajo del USB-C, no a su lado.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="hubname">Expansion Hub <span class="sec">REV-31-1153 · ¿ya lo tienen? confirmar</span></div>
+
+        <div class="lado">Lado izquierdo · arriba, los dos XT30 lado a lado; luego cada motor con su encoder justo debajo</div>
+        <div class="strip">
+          <div class="pin k-pow"><span class="bar"></span><span class="lbl">XT30 M ← CH</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">XT30 H libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-act"><span class="bar"></span><span class="lbl">M0 flywheel</span></div>
+          <div class="pin enc k-sig"><span class="bar"></span><span class="lbl">E0 flywheel</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">M1 flywheel2?</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E1 flywheel2?</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">M2 libre</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E2 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">M3 libre</span></div>
+          <div class="pin enc k-off"><span class="bar"></span><span class="lbl">E3 libre</span></div>
+        </div>
+
+        <div class="lado">Borde de abajo, de izquierda a derecha</div>
+        <div class="strip">
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S0 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S1 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S2 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S3 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S4 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">S5 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">+5V libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">+5V libre</span></div>
+        </div>
+
+        <div class="lado">Lado derecho, de arriba hacia abajo</div>
+        <div class="strip">
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">UART no</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">UART no</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-data"><span class="bar"></span><span class="lbl">RS485 ← CH</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">RS485 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 3 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 2 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 1 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">I2C 0 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 6-7 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 4-5 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 2-3 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">D 0-1 libre</span></div>
+          <div class="pin sep"></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">A 2-3 libre</span></div>
+          <div class="pin k-off"><span class="bar"></span><span class="lbl">A 0-1 libre</span></div>
+        </div>
+        <div class="cap">Sin USB-A, USB-C ni HDMI. Su Mini USB no se usa: la comunicación con el Control Hub va por RS485.</div>
+      </div>
+    </div>
+
+    <!-- ---------------- columna derecha: esquemático ---------------- -->
+    <div>
+      <h2>ESQUEMÁTICO</h2>
+      <div class="card">
+        <div class="leyenda">
+          <span class="k-pow"><i></i>potencia</span>
+          <span class="k-act"><i></i>actuador</span>
+          <span class="k-sig"><i></i>encoder (se mide)</span>
+          <span class="k-data"><i></i>datos: USB, I2C, RS485</span>
+          <span class="k-gnd"><i></i>tierra</span>
+          <span class="k-off"><i></i>libre o sin confirmar</span>
+        </div>
+        <div class="lienzo">
+        <svg viewBox="0 0 560 880" role="img" aria-label="Esquemático: batería, fusible, interruptor, Control Hub, Expansion Hub, Limelight, servos y motores">
+
+          <!-- ======== TORRETA ======== -->
+          <rect x="326" y="20" width="226" height="130" rx="8" class="zone"/>
+          <text x="336" y="40" class="t12 m i-act">TORRETA · ±110° ya calibrada</text>
+          <rect x="360" y="54" width="180" height="68" rx="6" class="bx bx-data"/>
+          <text x="450" y="74" class="t13 m c">Limelight 3A</text>
+          <text x="450" y="92" class="t12 c"><tspan class="i-pow">entra 4.1–5.75 V</tspan> <tspan class="i-ok">✓</tspan></text>
+          <text x="450" y="110" class="t12 c sec">4 W máx · sin batería aparte</text>
+          <text x="336" y="140" class="t12 sec">↖ loop de servicio</text>
+
+          <!-- USB 3.0 del Control Hub al Limelight, con loop -->
+          <path d="M300 262 L300 90 L308 90 C326 90 326 70 316 70 C306 70 306 90 324 90 L360 90" class="w w-data"/>
+          <text x="308" y="196" class="t12 m i-data">USB-A 3.0 (azul)</text>
+          <text x="308" y="213" class="t13 m i-pow">5 V USB</text>
+          <text x="308" y="229" class="t12 sec">nunca el USB 2.0</text>
+
+          <!-- ======== BATERÍA, FUSIBLE, INTERRUPTOR ======== -->
+          <!-- negativo a tierra -->
+          <path d="M60 44 L60 30 L24 30 L24 44" class="w w-gnd"/>
+          <path d="M12 44 L36 44 M16 50 L32 50 M20 56 L28 56" class="w w-gnd"/>
+          <!-- celdas: línea larga = + -->
+          <path d="M52 44 L68 44" class="w w-pow"/>
+          <path d="M44 51 L76 51" class="w w-pow"/>
+          <path d="M52 60 L68 60" class="w w-pow"/>
+          <path d="M44 67 L76 67" class="w w-pow"/>
+          <text x="72" y="42" class="t13">−</text>
+          <text x="80" y="74" class="t13 i-pow">+</text>
+          <text x="100" y="50" class="t13 m">Batería 12 V NiMH</text>
+          <text x="100" y="66" class="t12 sec">modelo: confirmar (R601)</text>
+
+          <path d="M60 67 L60 96" class="w w-pow"/>
+          <rect x="53" y="96" width="14" height="30" rx="2" class="bx bx-pow"/>
+          <path d="M60 96 L60 126" class="w w-pow"/>
+          <text x="100" y="108" class="t13 m">fusible 20 A (ATM)</text>
+          <text x="100" y="124" class="t12 sec">va en el cable de la batería</text>
+
+          <path d="M60 126 L60 149" class="w w-pow"/>
+          <circle cx="60" cy="152" r="3" class="f-pow"/>
+          <path d="M60 155 L77 181" class="w w-pow"/>
+          <circle cx="60" cy="188" r="3" class="f-pow"/>
+          <text x="100" y="166" class="t13 m">interruptor principal</text>
+          <text x="100" y="182" class="t12 sec">R603 · modelo: confirmar</text>
+
+          <path d="M60 191 L60 310 L110 310" class="w w-pow"/>
+          <text x="72" y="228" class="t13 m i-pow">12 V nom.</text>
+          <text x="72" y="244" class="t12">hub: 8–15 V <tspan class="i-ok">✓</tspan></text>
+
+          <!-- ======== CONTROL HUB ======== -->
+          <rect x="110" y="262" width="220" height="208" rx="8" class="bx bx-ok"/>
+          <text x="220" y="284" class="t14 m c">CONTROL HUB</text>
+          <text x="220" y="300" class="t12 c sec">REV-31-1595</text>
+          <!-- los dos XT30 unidos por dentro -->
+          <path d="M110 310 L150 310 L150 340 L110 340" class="w w-pow"/>
+          <path d="M150 325 L172 325" class="w w-pow"/>
+          <circle cx="150" cy="325" r="4" class="f-pow"/>
+          <text x="176" y="329" class="t12 i-pow">bus 12 V</text>
+          <text x="114" y="305" class="t12">XT30 M</text>
+          <text x="114" y="356" class="t12">XT30 H</text>
+          <!-- IMU interna -->
+          <rect x="196" y="340" width="122" height="42" rx="5" class="bx bx-data"/>
+          <text x="257" y="358" class="t13 m c i-data">IMU interna</text>
+          <text x="257" y="374" class="t12 c">I2C bus 0 · 3.3 V</text>
+          <text x="220" y="404" class="t12 c sec">logo ↑ · USB al frente</text>
+          <!-- tierra del hub -->
+          <path d="M130 414 L130 430" class="w w-gnd"/>
+          <path d="M120 430 L140 430 M124 436 L136 436 M128 442 L132 442" class="w w-gnd"/>
+          <text x="146" y="436" class="t12 sec">GND del hub</text>
+
+          <!-- ======== SERVOS ======== -->
+          <path d="M330 400 L440 400" class="w w-act"/>
+          <text x="336" y="393" class="t12 i-pow">S0 · 5 V</text>
+          <rect x="440" y="382" width="112" height="36" rx="5" class="bx bx-act"/>
+          <text x="496" y="397" class="t13 m c i-act">turret</text>
+          <text x="496" y="412" class="t12 c sec">posicional</text>
+
+          <path d="M330 450 L440 450" class="w w-act"/>
+          <text x="336" y="443" class="t12 i-pow">S2 · 5 V</text>
+          <rect x="440" y="432" width="112" height="36" rx="5" class="bx bx-act"/>
+          <text x="496" y="447" class="t13 m c i-act">hood</text>
+          <text x="496" y="462" class="t12 c sec">posicional</text>
+
+          <text x="552" y="490" class="t12 e i-pow">2 A por par · 5 A total</text>
+          <text x="552" y="506" class="t12 e i-off">stall del servo: confirmar</text>
+
+          <!-- ======== MOTORES DEL CHASIS ======== -->
+          <path d="M140 470 L140 511 M182 470 L182 511 M224 470 L224 511 M266 470 L266 511" class="w w-act"/>
+          <circle cx="140" cy="526" r="15" class="bx bx-act"/>
+          <circle cx="182" cy="526" r="15" class="bx bx-act"/>
+          <circle cx="224" cy="526" r="15" class="bx bx-act"/>
+          <circle cx="266" cy="526" r="15" class="bx bx-act"/>
+          <text x="140" y="531" class="t13 m c i-act">M</text>
+          <text x="182" y="531" class="t13 m c i-act">M</text>
+          <text x="224" y="531" class="t13 m c i-act">M</text>
+          <text x="266" y="531" class="t13 m c i-act">M</text>
+          <text x="140" y="557" class="t12 m c">FL</text>
+          <text x="182" y="557" class="t12 m c">FR</text>
+          <text x="224" y="557" class="t12 m c">BL</text>
+          <text x="266" y="557" class="t12 m c">BR</text>
+          <text x="140" y="573" class="t12 c sec">m0</text>
+          <text x="182" y="573" class="t12 c sec">m1</text>
+          <text x="224" y="573" class="t12 c sec">m2</text>
+          <text x="266" y="573" class="t12 c sec">m3</text>
+          <text x="203" y="595" class="t12 c i-pow">M+/M− · voltaje de batería</text>
+          <text x="203" y="611" class="t12 c i-off">encoders 0–3 libres → odometría</text>
+
+          <!-- ======== RS485 ======== -->
+          <path d="M312 470 L312 640" class="w w-data"/>
+          <text x="320" y="540" class="t13 m i-data">RS485</text>
+          <text x="320" y="556" class="t12 sec">JST PH 3 pines</text>
+          <text x="320" y="572" class="t12 sec">GND · B · A</text>
+          <text x="320" y="588" class="t12 sec">cualquiera de los 2</text>
+
+          <!-- ======== 12 V AL EXPANSION HUB ======== -->
+          <path d="M110 340 L84 340 L84 710 L110 710" class="w w-pow"/>
+          <text x="78" y="650" class="t12 i-pow" transform="rotate(-90 78 650)">extensión XT30 · 12 V</text>
+
+          <!-- ======== EXPANSION HUB ======== -->
+          <rect x="110" y="640" width="220" height="180" rx="8" class="bx bx-off"/>
+          <text x="220" y="662" class="t14 m c">EXPANSION HUB</text>
+          <text x="220" y="678" class="t12 c i-off">¿ya lo tienen? confirmar</text>
+          <text x="114" y="705" class="t12">XT30 M</text>
+          <text x="118" y="742" class="t12 sec">m2, m3: libres</text>
+          <text x="118" y="758" class="t12 sec">→ intake / alimentador</text>
+          <text x="118" y="774" class="t12 sec">servos 0–5: libres</text>
+          <path d="M130 786 L130 796" class="w w-gnd"/>
+          <path d="M120 796 L140 796 M124 802 L136 802 M128 808 L132 808" class="w w-gnd"/>
+          <text x="146" y="802" class="t12 sec">GND del hub</text>
+
+          <!-- flywheel: potencia y encoder en cables separados -->
+          <path d="M330 712 L431 712" class="w w-act"/>
+          <circle cx="446" cy="712" r="15" class="bx bx-act"/>
+          <text x="446" y="717" class="t13 m c i-act">M</text>
+          <text x="336" y="706" class="t12 i-act">m0 · M+/M−</text>
+          <path d="M446 727 L446 742 L330 742" class="w w-sig"/>
+          <text x="336" y="736" class="t12 i-sig">enc 0 · 3.3 V</text>
+          <text x="468" y="708" class="t13 m i-act">flywheel</text>
+          <text x="468" y="724" class="t12 sec">obligatorio</text>
+
+          <!-- flywheel2: opcional -->
+          <path d="M330 776 L431 776" class="w w-off"/>
+          <circle cx="446" cy="776" r="15" class="bx bx-off"/>
+          <text x="446" y="781" class="t13 m c i-off">M</text>
+          <text x="336" y="770" class="t12 i-off">m1 · M+/M−</text>
+          <path d="M446 791 L446 806 L330 806" class="w w-off"/>
+          <text x="336" y="800" class="t12 i-off">enc 1 · 3.3 V</text>
+          <text x="468" y="772" class="t13 m i-off">flywheel2</text>
+          <text x="468" y="788" class="t12 i-off">opcional</text>
+          <text x="468" y="804" class="t12 i-off">confirmar</text>
+
+          <!-- ======== NOTAS ======== -->
+          <text x="20" y="848" class="t12 sec">⏚ = negativo de la batería: llega a cada hub dentro del mismo XT30.</text>
+          <text x="20" y="866" class="t12">El chasis NO es tierra (R605) · motores 5 + 1 opcional ≤ 8 (R503) <tspan class="i-ok">✓</tspan></text>
+        </svg>
+        </div>
+        <div class="cap solo-angosto">En pantalla angosta el dibujo es más ancho que la tarjeta: deslízalo de lado. Todo lo que dice también está en las listas de abajo.</div>
+        <div class="cap">
+          El interruptor está dibujado abierto (apagado). Los motores no van a tierra: sus dos cables M+/M− salen del
+          puente H del hub. El encoder es un cable aparte, de 4 pines (Ch B · Ch A · 3.3 V · GND), y va al puerto de
+          encoder con el <b>mismo número</b> que su motor, en el mismo hub.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>A DÓNDE VA CADA PUERTO</h2>
+    <div class="cols">
+
+      <div class="card">
+        <div class="hubname">Control Hub</div>
+
+        <div class="row k-pow"><span class="chip"></span><span class="port">XT30 (M)</span>
+          <div><div class="dest">→ del interruptor principal · 12 V</div>
+          <div class="why">Toda la corriente del robot entra aquí, después del fusible de 20 A de la batería y del único switch (R603). Convención REV: el macho es la entrada del hub, y cuál es macho se ve en los contactos metálicos, no en la carcasa. <span class="pend">Cuál de los dos es: confirmar contra la pieza.</span></div></div></div>
+
+        <div class="row k-pow"><span class="chip"></span><span class="port">XT30 (H)</span>
+          <div><div class="dest">→ extensión XT30 al Expansion Hub</div>
+          <div class="why">Los dos XT30 están unidos por dentro, así que el EH toma los mismos 12 V y se apaga con el mismo switch. R608: los hubs solo se alimentan por XT30. La extensión de 30 cm viene en la caja del Control Hub.</div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Motor 0</span>
+          <div><div class="dest">→ frontLeft</div>
+          <div class="why">Los 4 motores del chasis van juntos en este hub: si el Expansion Hub falla, pierdes el tiro, no media tracción. Con 2 ruedas en cada hub, perder uno te dejaría girando en círculos. El código lo invierte (REVERSE).</div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Motor 1</span>
+          <div><div class="dest">→ frontRight</div>
+          <div class="why">FORWARD, sin cambios en el código. El conector JST VH tiene seguro de pestaña: presiónala para sacarlo, no jales el cable.</div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Motor 2</span>
+          <div><div class="dest">→ backLeft</div>
+          <div class="why">REVERSE, igual que frontLeft. Si al probar una rueda gira al revés, se corrige en MecanumDrive.java, no volteando cables.</div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Motor 3</span>
+          <div><div class="dest">→ backRight</div>
+          <div class="why">FORWARD. Cada puerto aguanta 10 A continuos, pero todo el robot comparte el fusible de 20 A de la batería: acelerar fuerte con el flywheel prendido puede tirar el voltaje. REV toma como señal de brownout que la Driver Station marque 9 V o menos con el código corriendo; abajo de 7 V el LED del hub parpadea naranja.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Encoder 0–3</span>
+          <div><div class="dest">→ libres · reservados para odometría</div>
+          <div class="why">El chasis corre RUN_WITHOUT_ENCODER: hoy nadie los lee. Aquí van las ruedas de odometría del autónomo (R303 J). Si conectas algo en el puerto de un motor en REVERSE, revisa el signo de su conteo al probar. <b>Con odometría en estos puertos, los motores del chasis nunca en RUN_USING_ENCODER ni RUN_TO_POSITION</b>: el hub usaría la rueda de odometría de ese número como si fuera el encoder del motor y el chasis se volvería errático.</div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Servo 0</span>
+          <div><div class="dest">→ turret (torreta)</div>
+          <div class="why">El actuador más sensible a retraso va en el Control Hub, sin pasar por RS485. Queda solo en su par 0-1: mueve el peso del Limelight, puede trabarse y el par entero da 2 A.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Servo 1</span>
+          <div><div class="dest">→ vacío a propósito</div>
+          <div class="why">Comparte los 2 A con la torreta. Si pones otro servo aquí y los dos se traban a la vez, se dispara la protección del par y te quedas sin torreta.</div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Servo 2</span>
+          <div><div class="dest">→ hood</div>
+          <div class="why">Es otro par (2-3), con sus propios 2 A. Nunca en el servo 1.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Servo 3</span>
+          <div><div class="dest">→ vacío a propósito</div>
+          <div class="why">Es el par del hood; misma razón que el servo 1.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Servo 4–5</span>
+          <div><div class="dest">→ libres · mejor no usarlos</div>
+          <div class="why">Suman a los 5 A totales del Control Hub junto con la torreta y el hood. Los servos del alimentador van mejor en el Expansion Hub, que tiene sus propios 5 A.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">+5V ×2</span>
+          <div><div class="dest">→ libres</div>
+          <div class="why">Dan 5 V, con 2 A entre los dos, y cuentan dentro de los mismos 5 A de los servos. R613 D: pueden alimentar un dispositivo que no esté conectado a otro regulador (salvo por USB). R611: si algún día ponen un hub USB con alimentación, tiene que salir de aquí o de una batería USB aprobada (R602).</div></div></div>
+
+        <div class="row k-data"><span class="chip"></span><span class="port">USB-A 3.0</span>
+          <div><div class="dest">→ Limelight 3A (cable USB-C → USB-A)</div>
+          <div class="why">Es el azul y el que pide Limelight. No lleva batería aparte: ese mismo USB le da 5 V y el Limelight acepta 4.1–5.75 V, 4 W máximo (≈0.8 A). Solo cabe un Limelight 3A por Control Hub.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">USB-A 2.0</span>
+          <div><div class="dest">→ nada · nunca la cámara</div>
+          <div class="why">FIRST documenta que una descarga electrostática en este puerto puede tumbar el Wi-Fi con la Driver Hub a media partida.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">USB-C</span>
+          <div><div class="dest">→ solo laptop</div>
+          <div class="why">Para cargar código. Nada del robot va conectado aquí.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Mini USB · HDMI · microSD</span>
+          <div><div class="dest">→ no se usan</div>
+          <div class="why">El Mini USB es solo para actualizar el firmware del sistema de E/S.</div></div></div>
+
+        <div class="row k-data"><span class="chip"></span><span class="port">I2C bus 0</span>
+          <div><div class="dest">→ IMU interna (ya viene conectada)</div>
+          <div class="why">Está dentro del hub, en la dirección 0x28. En la Driver Station aparece sola como <code>imu</code> en bus 0, puerto 0. Deja este bus para ella: hay otros tres libres.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">I2C bus 1–3</span>
+          <div><div class="dest">→ libres · 3.3 V</div>
+          <div class="why">Para una computadora de odometría I2C o sensores de color del intake. 500 mA en total para todos los I2C.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Digital 0–7</span>
+          <div><div class="dest">→ libres (4 conectores de 2 canales)</div>
+          <div class="why">Sirven para un fin de carrera o un sensor que detecte pieza en el alimentador. 3.3 V, 1 A en total.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Analógico 0–3</span>
+          <div><div class="dest">→ libres · el 0-1 reservado (pendiente de código)</div>
+          <div class="why">Reservado para el 4º cable de posición, si el servo de la torreta lo trae (R502 lo permite). La entrada acepta 0–5 V. <b>Hoy el código no lo lee:</b> conectarlo no cambia nada, la torreta sigue estimando su posición con MAX_SPEED_DEG_S. Hace falta agregar un nombre en Config.Names, darlo de alta en la DS como Analog Input y usarlo en Turret.java. <span class="pend">Pendiente de código. Voltaje de ese cable: confirmar contra la pieza.</span></div></div></div>
+
+        <div class="row k-data"><span class="chip"></span><span class="port">RS485 ×2</span>
+          <div><div class="dest">→ uno al RS485 del Expansion Hub, el otro libre</div>
+          <div class="why">Cable JST PH de 3 pines, viene en la caja. Da igual cuál de los dos puertos uses. Según ftc-docs, un segundo cable entre los otros dos puertos da redundancia.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">UART ×2</span>
+          <div><div class="dest">→ no se usan</div>
+          <div class="why">Solo sirven para depuración.</div></div></div>
+      </div>
+
+      <div class="card">
+        <div class="hubname">Expansion Hub <span class="sec">aparece en la DS como “Expansion Hub 2”</span></div>
+
+        <div class="row k-pow"><span class="chip"></span><span class="port">XT30 (M)</span>
+          <div><div class="dest">→ extensión desde el Control Hub · 12 V</div>
+          <div class="why">Misma batería y mismo switch. Cualquier otro camino de corriente al Expansion Hub es ilegal (R608).</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">XT30 (H)</span>
+          <div><div class="dest">→ libre</div>
+          <div class="why">Si algún día usan un Servo Power Module, R608 exige alimentarlo de la batería por sus bornes de tornillo. <span class="pend">De dónde sacar esos 12 V: pregúntenle al inspector antes de armarlo.</span></div></div></div>
+
+        <div class="row k-act"><span class="chip"></span><span class="port">Motor 0</span>
+          <div><div class="dest">→ flywheel</div>
+          <div class="why">El lazo de velocidad (RUN_USING_ENCODER + setVelocity) lo cierra el propio hub. Por RS485 solo viaja la consigna, así que estar en el EH no lo hace más lento. Es obligatorio: sin él ningún TeleOp arranca. Si gira al revés, se corrige con FLYWHEEL_REVERSED en Config.java, no volteando cables. <span class="pend">Modelo del motor: confirmar (el código asume 28 ticks por vuelta, sin caja, 1:1).</span></div></div></div>
+
+        <div class="row k-sig"><span class="chip"></span><span class="port">Encoder 0</span>
+          <div><div class="dest">→ encoder del flywheel</div>
+          <div class="why">Siempre el encoder del mismo número que su motor. Es un cable aparte del de potencia: JST PH de 4 pines a 3.3 V. Sin él, getRpm() lee 0, el control nunca vibra para avisar que está listo y el lazo empuja sin ver la velocidad real.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Motor 1</span>
+          <div><div class="dest">→ flywheel2 · opcional</div>
+          <div class="why">Solo si ponen un segundo motor, del mismo modelo que el primero (los dos usan el mismo TICKS_PER_FLYWHEEL_REV). Su sentido se corrige en el código, no volteando cables: voltear M+/M− invierte el motor pero no su encoder, y el lazo termina peleando contra sí mismo. El valor de FLYWHEEL_2_REVERSED depende del montaje: <b>true si los dos motores quedan en espejo</b> sobre el mismo eje, <b>false si giran igual</b> (mismo lado, o con un engrane o banda que invierte). El <code>true</code> que trae Config es solo el valor inicial. Con el valor mal y los dos acoplados, cada lazo empuja contra el otro: se traban y se calientan. <span class="pend">Confirmar si va a existir y cómo se monta.</span></div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Encoder 1</span>
+          <div><div class="dest">→ encoder de flywheel2 · opcional</div>
+          <div class="why">El código le pide su propio encoder, y la telemetría no lo revisa (getRpm() solo lee el del Motor 0). <b>Sin él, el hub cree que flywheel2 está parado y le manda más potencia de la necesaria, sin ver la velocidad real</b>, mientras el lazo de flywheel frena para corregir: los dos pelean sobre el mismo eje. Si en vez de puerto propio lo conectan en Y al Motor 0 (R505 permite 2 motores por puerto), NO den de alta <code>flywheel2</code> en la DS. En Y, el sentido del 2º motor lo da la polaridad de su rama: si van en espejo, esa rama va con M+/M− cruzados (la única excepción a la regla de no voltear cables). Solo se conecta el encoder del Motor 0 y el del 2º motor queda sin usar. Prueba cada motor por separado antes de acoplarlos.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Motor 2–3</span>
+          <div><div class="dest">→ libres · intake y alimentador</div>
+          <div class="why">Con 5 o 6 motores ya usados, R503 deja 2 o 3 más. Estos dos puertos son para eso.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Encoder 2–3</span>
+          <div><div class="dest">→ libres</div>
+          <div class="why">Para el intake, o para una tercera rueda de odometría si las del Control Hub no alcanzan.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Servo 0–5</span>
+          <div><div class="dest">→ libres · servos del alimentador</div>
+          <div class="why">Tienen su propio presupuesto de 5 A (2 A por par), separado del de la torreta.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">+5V ×2</span>
+          <div><div class="dest">→ libres</div>
+          <div class="why">Mismas reglas que en el Control Hub: 2 A entre los dos, dentro de los 5 A de los servos de este hub. R613 D y R611 aplican igual.</div></div></div>
+
+        <div class="row k-data"><span class="chip"></span><span class="port">RS485 ×2</span>
+          <div><div class="dest">→ uno al Control Hub, el otro libre</div>
+          <div class="why">El libre sirve para un segundo cable de respaldo hacia el Control Hub. Con un solo Expansion Hub no hay que cambiar la dirección: sale de fábrica en 2. LED verde con 2 destellos azules cada ~5 s = conectado bien.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">I2C 0–3 · digital · analógico</span>
+          <div><div class="dest">→ libres</div>
+          <div class="why">Los Expansion Hub enviados desde diciembre de 2021 no traen IMU: la <code>imu</code> del robot es la del Control Hub.</div></div></div>
+
+        <div class="row k-off"><span class="chip"></span><span class="port">Mini USB · UART</span>
+          <div><div class="dest">→ no se usan</div>
+          <div class="why">La comunicación con el Control Hub ya va por RS485.</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>LO QUE NO ES OBVIO</h2>
+    <div class="callouts">
+
+      <div class="callout k-pow">
+        <h3>«¿Por qué hace falta un Expansion Hub?»</h3>
+        <p>Cuenta los motores que el código pide por nombre: los 4 del chasis más <code>flywheel</code> son 5, y 6 si ponen
+        <code>flywheel2</code>. El Control Hub tiene 4 puertos de motor. Sin Expansion Hub, <code>hardwareMap.get("flywheel")</code>
+        truena al dar INIT y el TeleOp no arranca, ni siquiera para manejar.</p>
+        <p>El reglamento permite como máximo uno extra (R701 C), y 4 + 4 = 8 puertos: justo el tope de 8 motores (R503). Se conecta con
+        dos cables: XT30 para la corriente y RS485 para los datos.</p>
+        <p>Mientras llega: <b>«Tune: Torreta»</b> solo necesita el servo <code>turret</code>, y <b>«Tune: Tiro»</b> no usa el
+        chasis, así que puede correr con el flywheel en un puerto del Control Hub y una configuración aparte.</p>
+      </div>
+
+      <div class="callout k-bad">
+        <h3>«¿Por qué la torreta y el hood no van en los servos 0 y 1?»</h3>
+        <p>Los 6 puertos de servo van en pares (0-1, 2-3, 4-5). Cada par da <b>2 A máximo</b>, con 5 A en total para todos los
+        servos y los +5V, y siempre a 5 V. Un servo trabado jala mucho más que uno moviéndose: un goBILDA serie 2000
+        pide 2.0 A a 4.8 V, y un Axon MAX 3.6 A a 4.8 V (4.0 A a 6 V).</p>
+        <p>Si torreta y hood comparten par, basta con que la torreta choque para que el par pase de 2 A y se dispare su
+        protección. REV no documenta si corta o solo limita, así que podrías perder torreta y hood al mismo tiempo. Por eso van en
+        S0 y S2, con S1 y S3 vacíos.</p>
+        <p>Si su servo pasa de 2 A trabado (<span class="pend">confirmar contra la pieza</span>), cambiar de par no basta: hace falta un
+        REV Servo Power Module (6 V fijos) o un REV Servo Hub (voltaje configurable; el manual lo cuenta a 6 V): los dos dan
+        3 A por canal y 15 A en total, y se alimentan de la batería por sus bornes (R608).</p>
+      </div>
+
+      <div class="callout k-bad">
+        <h3>«¿Qué le pasa al cable del Limelight cuando gira la torreta?»</h3>
+        <p>Se enrolla y desenrolla en cada giro. Si queda tenso, se jala el conector.
+        Como el Limelight se alimenta por ese mismo USB, un falso contacto no solo corta los datos: <b>lo reinicia</b>, y según
+        Limelight tarda 15–20 s en volver a arrancar. En ese rato la torreta sigue 1 s con el último rumbo (TARGET_MEMORY_S),
+        compensando con la IMU; después se queda quieta y ciega hasta que el Limelight vuelve, y el shooter conserva las últimas
+        RPM y la última posición del hood.</p>
+        <p><b>¿Cuánto gira de verdad?</b> Los ±110° (220° de tope a tope) los aplica solo Turret.java, y solo valen
+        <b>después de calibrar</b>: mientras SERVO_CENTER y DEG_PER_SERVO_UNIT sean de relleno, ±110° en el código no son ±110°
+        reales. Y «Tune: Torreta» no respeta ningún límite en grados: mueve el servo por todo su recorrido, de 0 a 1. Con un servo
+        de 300° montado 1:1 eso son ±150°, y con engranes que multipliquen el giro, más. Por eso la holgura se mide con el recorrido
+        mecánico real, no con Config.</p>
+        <p>La guía de cableado de FTC recomienda: conector en ángulo recto, loop de servicio amarrado en la parte fija y en la que gira,
+        alivio de tensión a 1–2 in del conector y una ferrita cerca del USB. De holgura, si el cable rodea el eje a un radio r, necesita
+        unos r × θ extra, con θ en radianes: para 220° son r × 3.84 (con r = 40 mm, ~154 mm) y para 300° son r × 5.24 (~210 mm).
+        Un tope mecánico un poco más allá de ±110° protege el cable aunque el software se equivoque; si la torreta llega a tocarlo,
+        el servo se traba y jala corriente de stall, y por eso va solo en su par.
+        <span class="ref">Es cálculo, no medida: compruébalo girando la torreta a mano de tope a tope con el robot apagado.</span></p>
+      </div>
+
+      <div class="callout k-pow">
+        <h3>«¿Por qué importa hacia dónde apunta el logo del Control Hub?»</h3>
+        <p>La IMU va dentro del Control Hub, y Robot.java (líneas 41-43) le dice que el hub va plano, con el logo hacia arriba y
+        el borde de los USB (el opuesto a los servos) hacia el frente del robot.</p>
+        <p>Si lo montan plano pero girado, con los USB hacia atrás o a un lado, no pasa nada, porque el código solo usa cambios de yaw.
+        <b>De cabeza</b>, el giro sale con el signo al revés y la torreta contragira para el lado equivocado: duplica el error
+        justo cuando el driver rota. <b>Parado</b>, el giro del chasis se va a pitch/roll y se pierde la compensación sin ningún aviso.</p>
+        <p>Además va fijo al chasis, nunca sobre la torreta. Si no cabe así, se cambia la orientación en Robot.java.
+        <span class="ref">Análisis del código, no medido.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>CONFIGURACIÓN EN LA DRIVER STATION</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>Hub</th><th>Puerto</th><th>Tipo a elegir</th><th>Nombre exacto</th><th>¿Es necesario?</th></tr>
+        </thead>
+        <tbody>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">Motor 0</td><td data-l="Tipo">el modelo de tu motor <span class="pend">confirmar contra la pieza</span></td><td data-l="Nombre"><code>frontLeft</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">Motor 1</td><td data-l="Tipo">el modelo de tu motor <span class="pend">confirmar contra la pieza</span></td><td data-l="Nombre"><code>frontRight</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">Motor 2</td><td data-l="Tipo">el modelo de tu motor <span class="pend">confirmar contra la pieza</span></td><td data-l="Nombre"><code>backLeft</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">Motor 3</td><td data-l="Tipo">el modelo de tu motor <span class="pend">confirmar contra la pieza</span></td><td data-l="Nombre"><code>backRight</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">Servo 0</td><td data-l="Tipo">Servo (nunca “Continuous Rotation Servo”)</td><td data-l="Nombre"><code>turret</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">Servo 2</td><td data-l="Tipo">Servo</td><td data-l="Nombre"><code>hood</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">I2C bus 0 · puerto 0</td><td data-l="Tipo">IMU: la pone sola (BHI260AP o BNO055)</td><td data-l="Nombre"><code>imu</code></td><td data-l="¿Necesario?" class="op">opcional, pero sin ella la torreta no contragira</td></tr>
+          <tr><td data-l="Hub">Control Hub</td><td data-l="Puerto">USB-A 3.0</td><td data-l="Tipo">“Ethernet Device” que aparece al dar Scan</td><td data-l="Nombre"><code>limelight</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Expansion Hub 2</td><td data-l="Puerto">Motor 0</td><td data-l="Tipo">el modelo de tu motor <span class="pend">confirmar contra la pieza</span></td><td data-l="Nombre"><code>flywheel</code></td><td data-l="¿Necesario?" class="ob">obligatorio</td></tr>
+          <tr><td data-l="Hub">Expansion Hub 2</td><td data-l="Puerto">Motor 1</td><td data-l="Tipo">el mismo modelo que flywheel <span class="pend">confirmar si existe</span></td><td data-l="Nombre"><code>flywheel2</code></td><td data-l="¿Necesario?" class="op">opcional</td></tr>
+        </tbody>
+      </table>
+      <div class="cap">
+        Los nombres distinguen mayúsculas: <code>frontLeft</code> ≠ <code>frontleft</code>, y <code>flywheel2</code> va sin espacio.
+        <b>Obligatorio</b> quiere decir que el código usa <code>hardwareMap.get</code>: si falta, el OpMode truena al dar INIT
+        (en «Tune: Tiro», al dar Play, porque primero te deja elegir la alianza).
+        <b>Opcional</b> usa <code>tryGet</code>: si falta, se ignora. El Limelight no aparece solo: Configure Robot → Scan → sale como
+        “Ethernet Device” y hay que renombrarlo a <code>limelight</code>. El Expansion Hub aparece dentro de “Control Hub Portal”.
+        “Servo” manda de 600 a 2400 µs y “Full Range Servo” de 500 a 2500 µs. Elijan uno <b>antes</b> de calibrar y no lo cambien después,
+        o SERVO_CENTER, DEG_PER_SERVO_UNIT, HOOD_MIN, HOOD_MAX y la columna del hood en SHOT_TABLE quedan mal: todos están en unidades de servo.
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section class="cols">
+    <div>
+      <h2>ANTES DE ENERGIZAR</h2>
+      <div class="card">
+        <ol class="checks">
+          <li><b>Batería.</b> Antes de conectarla, mide en su XT30 con el multímetro: punta roja en el contacto + y negra en el −.
+            Tiene que leer entre +9 y +15 V. Si sale negativo, el cable está invertido: no lo conectes.
+            <div class="why">15 V es el máximo absoluto del hub. Sin carga, no la descarguen por debajo de 9.0 V (dato de REV para su
+            Slim Battery REV-31-1302; <span class="pend">confirmar con la hoja de su batería</span>); que baje de 9 V por momentos al
+            acelerar es normal. El fusible de 20 A tiene que estar puesto y nunca uno mayor (R604). Si arman un cable ustedes (por
+            ejemplo, para el switch): 18 AWG o más grueso (R609), + rojo y − negro o azul (R610); los cables de fábrica están exentos.</div></li>
+          <li><b>Switch en OFF</b> al conectar la batería. Todo el 12 V pasa por él.
+            <div class="why">Móntenlo hundido o protegido: si un rival te apaga un switch expuesto, probablemente no es falta suya (G419).</div></li>
+          <li><b>Chasis aislado.</b> Mide continuidad entre el negativo del XT30 y el metal del chasis: sin correa de tierra tiene que
+            salir abierto; con la correa resistiva lees la resistencia de la correa, nunca un corto.
+            <div class="why">R605: el chasis no puede llevar corriente. Solo se permite aterrizar la electrónica al chasis con una de las
+            correas resistivas aprobadas (AndyMark am-4648a, REV-31-1269 o Swyft SR-Ground-01), conectada directo a un XT30 de una pieza
+            COTS y al chasis por su terminal resistiva. REV recomienda la REV-31-1269 contra los reinicios de la IMU por estática.</div></li>
+          <li><b>Conectores de servo al derecho.</b> Van sin guía y se pueden poner al revés. El orden de REV es GND · 5 V · señal.
+            <div class="why">El cable de tierra del servo va hacia GND en la serigrafía del hub. <span class="pend">Color del cable de tierra de su servo: confirmar con su hoja.</span></div></li>
+          <li><b>¿Tu servo viene en modo continuo?</b> Tiene que estar en modo posición.
+            <div class="why">goBILDA serie 2000 y REV Smart Servo salen de fábrica en modo posición; <span class="pend">Axon: confirmar</span>. Prueba con «Tune: Torreta» y el servo suelto: se tiene que detener en cada posición, no seguir girando.</div></li>
+          <li><b>Qué hace al arrancar.</b> En INIT el TeleOp no le manda nada a los servos. Al dar Play, la torreta brinca a
+            SERVO_CENTER (0.50) y el hood también se mueve: a 0.20 en el TeleOp (la primera fila de SHOT_TABLE) y a 0.50 en «Tune: Tiro».
+            <div class="why">Pon el servo de la torreta en 0.50 con «Tune: Torreta» <b>antes</b> de acoplarle la torreta, y móntala
+            mirando al frente. El hood igual: acóplalo con su servo en 0.50 («Tune: Tiro», flywheel apagado) y recórrelo de 0.01 en 0.01
+            (dpad ← →), deteniéndote antes de cada tope. Esos dos valores son HOOD_MIN y HOOD_MAX; los 0.10 y 0.90 de Config son de
+            relleno y, si el hood topa antes, el servo se queda trabado empujando. No corras el TeleOp con el hood acoplado hasta
+            ponerlos. El flywheel arranca apagado; al detener el OpMode gira libre (FLOAT): no metas la mano hasta que pare.</div></li>
+          <li class="rojo"><b>Calibra la torreta con el USB del Limelight desconectado</b> (o con el Limelight todavía sin montar).
+            <div class="why">En «Tune: Torreta» nada limita el giro en grados: el servo va de 0 a 1. Acércate a cada tope con el dpad
+            (0.01) y el último tramo con los bumpers (0.001), y detente antes del tope mecánico. Hasta que pongas SERVO_CENTER y
+            DEG_PER_SERVO_UNIT reales en Config, los ±110° del código no valen. Con esos números ya puestos, mide el recorrido real
+            y con él dimensiona el loop del USB.</div></li>
+          <li class="rojo"><b>Encoder del flywheel.</b> En «Tune: Tiro», antes de prenderlo, baja la consigna con dpad ↓ hasta unas
+            500 RPM (la telemetría muestra “off 0 / 500 rpm”) y luego presiona el bumper derecho. La telemetría tiene que subir hacia la consigna.
+            <div class="why">Si se queda en 0 o sale negativa, apágalo de inmediato: el lazo no está viendo el giro real (falta el cable
+            de encoder, está en otro número o voltearon el motor). Bajar las RPM reduce el empujón, pero no lo quita: sin encoder, el hub
+            cree que el motor está parado y le manda más potencia de la necesaria. Ten el dedo en STOP. Esta prueba solo lee el Motor 0. Si hay <code>flywheel2</code>, pruébalo
+            aparte: en una copia de la configuración, ponle <code>flywheel</code> al Motor 1 del EH y no des de alta el Motor 0; así
+            «Tune: Tiro» muestra las RPM que lee su propio encoder. Antes de acoplar los dos al mismo eje, pruébalos desacoplados y confirma
+            que los dos empujan la pieza hacia el mismo lado.</div></li>
+          <li><b>Expansion Hub.</b> LED verde con 2 destellos azules cada ~5 s. En la DS aparece como “Expansion Hub 2”.</li>
+          <li><b>Limelight.</b> Después de Scan y de renombrarlo, la telemetría no debe decir “!! LIMELIGHT DESCONECTADO”.
+            <div class="why">Ya con la torreta calibrada, gírala a mano de tope a tope con el robot apagado y fíjate que el USB nunca quede tenso.</div></li>
+          <li><b>IMU.</b> En la página Manage, revisa si tu hub trae BHI260AP o BNO055. “IMU ok” en la telemetría solo confirma que
+            existe un dispositivo llamado <code>imu</code>, y solo se ve en INIT: no revisa hacia dónde apunta el hub.
+            <div class="why">Prueba el signo en el TeleOp: con el auto-apuntado fijo en un CELL, gira el chasis rápido unos 45° a la
+            izquierda. La torreta tiene que girar a la derecha en ese mismo instante y quedarse en el objetivo. Si se va con el chasis
+            y luego regresa, la compensación no funciona: el hub está parado o de cabeza, o su orientación está mal escrita en
+            Robot.java. El código no muestra el yaw en ninguna telemetría. <span class="pend">Agregarlo (girar a la izquierda =
+            positivo) haría esta prueba directa: pendiente de código.</span></div></li>
+          <li><b>Inspección.</b> Las luces del Control Hub tienen que verse (R606).</li>
+        </ol>
+      </div>
+    </div>
+
+    <div>
+      <h2>SIN CONFIRMAR CONTRA LA PIEZA</h2>
+      <div class="card">
+        <ul class="sinconf">
+          <li><b>Servos de torreta y hood:</b> modelo, corriente trabados a 5 V, rango en grados y modo. Con eso se decide si caben en el riel de 5 V (2 A por par) o necesitan Servo Power Module.</li>
+          <li><b>Relación servo → torreta</b> (engranes o banda). Si DEG_PER_SERVO_UNIT × el menor de SERVO_CENTER y 1 − SERVO_CENTER
+            sale menor a 110, la torreta no llega a ±110° de ese lado: en auto-apuntado sale “!! TORRETA AL LIMITE”, en manual no avisa.
+            El caso peligroso es el contrario: mientras DEG_PER_SERVO_UNIT sea el 300 de relleno, si la relación real da más de 300°
+            por recorrido del servo, la torreta pasa de ±110° reales y jala el cable del Limelight.</li>
+          <li><b>Motores del chasis y del flywheel:</b> modelo, tipo en la DS y ticks por vuelta. El código asume 28 ticks por vuelta del flywheel (sin caja, 1:1).</li>
+          <li><b>Encoders:</b> que funcionen con los 3.3 V del puerto (500 mA en total para los 4).</li>
+          <li><b>Expansion Hub:</b> si ya lo tienen. Sin él, el TeleOp no arranca.</li>
+          <li><b>flywheel2:</b> si va a existir, si va en su propio puerto o en Y con el primero, y si queda en espejo o del mismo
+            lado (de eso depende FLYWHEEL_2_REVERSED, o la polaridad de la rama si va en Y).</li>
+          <li><b>Hood:</b> HOOD_MIN y HOOD_MAX reales (0.10 y 0.90 son de relleno), medidos antes de correr el TeleOp con el hood acoplado.</li>
+          <li><b>Batería e interruptor:</b> que sean de las listas de R601 y R603. Cuál de los dos XT30 del hub (izquierdo o derecho) es el macho, visto por los contactos metálicos.</li>
+          <li><b>Corriente del USB 3.0:</b> REV no publica cuánta da; el Limelight pide hasta ~0.8 A.</li>
+          <li><b>Protección de servos:</b> qué hace exactamente el hub cuando un par pasa de 2 A.</li>
+          <li><b>IMU:</b> si su Control Hub trae BHI260AP (desde sept. 2022) o BNO055.</li>
+          <li><b>“Servo” o “Full Range Servo”</b> en la DS: decidirlo antes de calibrar.</li>
+          <li><b>Mini USB del Expansion Hub:</b> dónde queda físicamente.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>DE DÓNDE SALE CADA DATO</h2>
+    <div class="fuentes">
+      Puertos, pinout, corrientes y protecciones de los hubs:
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/control-hub-basics">REV Control Hub basics</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/port-pinouts">REV port pinouts</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/expansion-hub-basics">REV Expansion Hub basics</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/protection-features">REV protection features</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/cables-and-connectors">REV cables y conectores</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/menu/adding-more-motors/adding-an-expansion-hub">REV agregar Expansion Hub</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/cables-and-connectors/xt-30-power-cable">REV XT30 (macho y hembra por los contactos)</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/troubleshooting-the-control-system/led-blink-codes">REV códigos del LED (verde + destellos azules, naranja &lt; 7 V)</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/troubleshooting-the-control-system/control-hub-troubleshooting">REV troubleshooting (brownout: 9 V o menos en la DS)</a><br>
+      Qué trae cada caja (extensión XT30 y cable JST PH de 3 pines, 30 cm):
+      <a href="https://www.revrobotics.com/rev-31-1595/">REV-31-1595 Control Hub</a> ·
+      <a href="https://www.revrobotics.com/rev-31-1153/">REV-31-1153 Expansion Hub</a><br>
+      Batería: <a href="https://www.revrobotics.com/rev-31-1302/">REV 12V Slim Battery REV-31-1302 (9.0 V mínimo sin carga)</a><br>
+      IMU y orientación:
+      <a href="https://docs.revrobotics.com/duo-control/sensors/i2c/imu">REV IMU</a> ·
+      <a href="https://ftc-docs.firstinspires.org/en/latest/programming_resources/imu/imu.html">ftc-docs IMU</a> ·
+      <a href="https://docs.revrobotics.com/duo-control/control-system-overview/dimensions">REV dimensiones</a><br>
+      USB, estática y cableado:
+      <a href="https://ftc-docs.firstinspires.org/en/latest/control_hard_compon/rc_components/hub/ports/ch-ports.html">ftc-docs puertos del Control Hub (foto de frente con el orden de los USB; RS485 de respaldo)</a> ·
+      <a href="https://ftc-docs.firstinspires.org/en/latest/hardware_and_software_configuration/configuring/configuring_external_webcam/configuring-external-webcam.html">ftc-docs webcam (ESD en USB 2.0)</a> ·
+      <a href="https://ftc-docs.firstinspires.org/en/latest/robot_building/wiring_guide/wiring-guide.html">ftc-docs guía de cableado</a><br>
+      Limelight:
+      <a href="https://docs.limelightvision.io/docs/docs-limelight/getting-started/limelight-3a">Limelight 3A getting started</a> ·
+      <a href="https://limelightvision.io/products/limelight-3a">Limelight 3A producto (solo uno por Control Hub)</a><br>
+      Servos: <a href="https://www.gobilda.com/2000-series-dual-mode-servo-25-2-torque/">goBILDA 2000</a> ·
+      <a href="https://docs.axon-robotics.com/servos/max">Axon MAX (3.6 A a 4.8 V, 4.0 A a 6 V)</a> ·
+      <a href="https://docs.revrobotics.com/rev-crossover-products/servo/srs">REV Smart Servo</a> ·
+      <a href="https://docs.revrobotics.com/rev-crossover-products/servo/spm">REV Servo Power Module</a> ·
+      <a href="https://docs.revrobotics.com/rev-crossover-products/servo/servo-hub">REV Servo Hub (0.5–7.4 V configurable)</a><br>
+      Reglas: manual BIOBUZZ V1 / TU01, R501–R505, R601–R613, R701–R708, G419. El tope de 4 A de corriente de servo trabado (R502) sale del PDF V1, p. 132.<br>
+      Código: <code>Config.java</code> (nombres y constantes), <code>Robot.java</code> (IMU), <code>subsystems/</code>, <code>opmodes/</code> y <code>vision/CellVision.java</code>.
+      Rangos de pulso de la DS: SDK 12.0, RobotCore (<code>PwmControl.PwmRange</code> por defecto 600–2400 µs; <code>Servo</code> como
+      <code>ServoFullRange</code> 500–2500 µs).
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
