@@ -20,6 +20,7 @@ Base: FtcRobotController SDK **12.0**, Java. Todo el código propio vive en
 | `subsystems/MecanumDrive.java` | Chasis mecanum básico. |
 | `opmodes/TeleOpRed`, `TeleOpBlue` | TeleOp de competencia. |
 | `opmodes/TuneTurret`, `TuneShooter` | Calibración. |
+| `docs/cableado.html` | Hoja de cableado: cada puerto de cada hub y por qué. |
 
 ### Por qué no se apunta al promedio de los tags
 
@@ -36,17 +37,41 @@ un historial de hacia dónde apuntaba y suma el `tx` al ángulo que había **cua
 la foto**. Además guarda el rumbo del objetivo en el campo con el IMU, así que cuando el
 driver gira el chasis la torreta contragira sin esperar otra foto.
 
+## Cableado
+
+![Esquemático del robot](docs/esquematico.png)
+
+La hoja completa está en [docs/cableado.html](docs/cableado.html). Descárgala y ábrela en el
+navegador: trae cada puerto con su porqué, las dudas no obvias y la lista de antes de
+energizar. [docs/cableado.png](docs/cableado.png) es la misma hoja como imagen, para verla
+desde GitHub o el teléfono.
+
+Nada de esto se ha medido en el robot físico. Sale de la documentación de REV, Limelight y
+FIRST, del manual y del código. Lo marcado "confirmar contra la pieza" sigue pendiente.
+
+Con 5 o 6 motores el robot **necesita un Expansion Hub**: el Control Hub solo tiene 4 puertos
+de motor, y sin él el TeleOp truena al dar INIT.
+
 ## Configuración del robot en la Driver Station
 
-| Nombre | Tipo |
-|---|---|
-| `limelight` | Limelight 3A, puerto USB 3.0 del Control Hub |
-| `turret` | Servo |
-| `hood` | Servo |
-| `flywheel` | Motor, con cable de encoder |
-| `flywheel2` | Motor, opcional, también con encoder |
-| `frontLeft`, `frontRight`, `backLeft`, `backRight` | Motores del chasis |
-| `imu` | IMU del Control Hub |
+Los nombres distinguen mayúsculas. Obligatorio significa que el código usa
+`hardwareMap.get` y el OpMode truena si falta.
+
+| Hub | Puerto | Nombre | Tipo | |
+|---|---|---|---|---|
+| Control Hub | Motor 0 | `frontLeft` | modelo del motor | obligatorio |
+| Control Hub | Motor 1 | `frontRight` | modelo del motor | obligatorio |
+| Control Hub | Motor 2 | `backLeft` | modelo del motor | obligatorio |
+| Control Hub | Motor 3 | `backRight` | modelo del motor | obligatorio |
+| Control Hub | Servo 0 | `turret` | Servo, nunca Continuous Rotation | obligatorio |
+| Control Hub | Servo 2 | `hood` | Servo | obligatorio |
+| Control Hub | I2C bus 0 | `imu` | viene configurada sola | opcional |
+| Control Hub | USB-A 3.0, el azul | `limelight` | "Ethernet Device" al dar Scan, renombrarlo | obligatorio |
+| Expansion Hub 2 | Motor 0 + encoder 0 | `flywheel` | modelo del motor, con cable de encoder | obligatorio |
+| Expansion Hub 2 | Motor 1 + encoder 1 | `flywheel2` | mismo modelo que `flywheel` | opcional |
+
+La torreta y el hood van en los servos 0 y 2, no 0 y 1: cada par de puertos de servo
+comparte 2 A, y así un servo trabado no tumba al otro.
 
 ## Pipeline del Limelight
 
@@ -60,7 +85,9 @@ En la interfaz web del Limelight, pipeline **0**:
 
 ## Orden de calibración
 
-1. **Tune: Torreta**. Sacar `SERVO_CENTER`, `DEG_PER_SERVO_UNIT`, `SERVO_INVERTED` y los límites.
+1. **Tune: Torreta**, con el USB del Limelight desconectado: este OpMode no respeta los límites
+   en grados y puede jalar el cable. Sacar `SERVO_CENTER`, `DEG_PER_SERVO_UNIT`,
+   `SERVO_INVERTED` y los límites.
 2. Medir con cinta `CAMERA_HEIGHT_IN`, `CAMERA_PITCH_DEG` y `TAG_HEIGHT_IN`.
 3. **Tune: Tiro**. Comparar las dos distancias contra la cinta, elegir `USE_3D_DISTANCE`
    y llenar `SHOT_TABLE` en cinco o seis distancias.
