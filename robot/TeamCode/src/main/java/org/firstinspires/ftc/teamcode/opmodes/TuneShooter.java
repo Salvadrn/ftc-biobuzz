@@ -4,82 +4,112 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.Alliance;
-import org.firstinspires.ftc.teamcode.Config.ShooterCfg;
-import org.firstinspires.ftc.teamcode.subsystems.Shooter;
-import org.firstinspires.ftc.teamcode.subsystems.Turret;
+import org.firstinspires.ftc.teamcode.BallType;
+import org.firstinspires.ftc.teamcode.Config.HoodCfg;
+import org.firstinspires.ftc.teamcode.Config.ShotCfg;
+import org.firstinspires.ftc.teamcode.Robot;
 import org.firstinspires.ftc.teamcode.vision.CellTarget;
-import org.firstinspires.ftc.teamcode.vision.CellVision;
 
 /**
- * Para llenar Config.ShooterCfg.SHOT_TABLE. No usa el chasis: el robot se coloca a mano.
+ * Para llenar Config.ShotCfg.POLLEN_TABLE y NECTAR_TABLE. Usa el robot completo con las
+ * pelotas metidas a mano en la fila o en la copa. El chasis no se mueve: el robot se
+ * coloca a mano.
  *
  * PROCEDIMIENTO
- *  1. Poner el robot a una distancia conocida del CELL. Comparar la cinta métrica contra
- *     las dos distancias de la telemetría. Si "trig" sale mal, corregir CAMERA_HEIGHT_IN,
- *     CAMERA_PITCH_DEG y TAG_HEIGHT_IN en Config.
- *  2. Ajustar RPM y hood hasta que el POLLEN entre limpio varias veces seguidas.
- *  3. Anotar la fila {distancia, rpm, hood}. Usar la MISMA distancia que usará el robot
- *     en partido: la que marca USE_3D_DISTANCE.
- *  4. Repetir en cinco o seis distancias, de la más cercana a la más lejana.
+ *  1. Antes, "Tune: Torreta", "Tune: Hood", "Tune: Copa" y "Test: Sensores" tienen que
+ *     estar hechos. Con cinta métrica, compara la distancia de la telemetría con la real
+ *     (del eje de la torreta a la fila de tags). Si no cuadra, revisa CAMERA_HEIGHT_IN,
+ *     CAMERA_PITCH_DEG y las alturas de las filas en Config.
+ *  2. Revisa que "HIVE arriba" diga la CELL correcta. Si no, X la cambia y anota en qué
+ *     distancia se equivocó.
+ *  3. Ajusta rpm y δ hasta que la pelota entre limpia varias veces seguidas. Anota la FILA
+ *     en la tabla de esa pelota (el gap lo decide el V3 de arriba, no tú).
+ *  4. Cinco o seis distancias por tipo de pelota, de la más cercana a la más lejana.
  *
  * CONTROLES
- *   En INIT:  X = alianza azul    B = alianza roja
- *   dpad arriba/abajo = RPM ±50      dpad der/izq = hood ±0.01
- *   bumper derecho = flywheel sí/no  A = auto-apuntado sí/no
+ *   En INIT: X = azul, B = roja, A = arrancar con esa alianza
+ *   dpad arriba/abajo = rpm ±50     dpad der/izq = δ ±0.5°
+ *   bumper derecho = flywheel sí/no    Y = auto-apuntado sí/no
+ *   gatillo derecho = un tiro (cuando todo está listo)    X = cambiar CELL de arriba
  */
 @TeleOp(name = "Tune: Tiro", group = "2 Calibracion")
 public class TuneShooter extends LinearOpMode {
     @Override
     public void runOpMode() {
         Alliance alliance = Alliance.RED;
+        Robot robot = null;
         while (opModeInInit()) {
-            if (gamepad1.x) alliance = Alliance.BLUE;
-            if (gamepad1.b) alliance = Alliance.RED;
-            telemetry.addData("Alianza", "%s   (X = azul, B = roja)", alliance);
+            long now = System.nanoTime();
+            if (robot == null) {
+                if (gamepad1.x) alliance = Alliance.BLUE;
+                if (gamepad1.b) alliance = Alliance.RED;
+                if (gamepad1.aWasPressed()) robot = new Robot(hardwareMap, alliance);
+                telemetry.addData("Alianza", "%s   (X = azul, B = roja, A = arrancar)", alliance);
+            } else {
+                boolean ready = robot.initStep(now);
+                telemetry.addData("Alianza", alliance);
+                telemetry.addData("Inicio", ready ? "listo" : "preparando...");
+            }
             telemetry.update();
         }
-        if (isStopRequested()) return;
-
-        Turret turret = new Turret(hardwareMap);
-        Shooter shooter = new Shooter(hardwareMap);
-        CellVision vision = new CellVision(hardwareMap, alliance);
-
-        double rpm = ShooterCfg.IDLE_RPM;
-        double hood = (ShooterCfg.HOOD_MIN + ShooterCfg.HOOD_MAX) / 2;
-        boolean autoAim = true;
-        turret.center();
-
-        while (opModeIsActive()) {
-            if (gamepad1.dpadUpWasPressed()) rpm += 50;
-            if (gamepad1.dpadDownWasPressed()) rpm -= 50;
-            if (gamepad1.dpadRightWasPressed()) hood += 0.01;
-            if (gamepad1.dpadLeftWasPressed()) hood -= 0.01;
-            if (gamepad1.rightBumperWasPressed()) shooter.setEnabled(!shooter.isEnabled());
-            if (gamepad1.aWasPressed()) autoAim = !autoAim;
-
-            rpm = Math.max(0, rpm);
-            hood = Math.max(ShooterCfg.HOOD_MIN, Math.min(ShooterCfg.HOOD_MAX, hood));
-
-            CellTarget frame = vision.update();
-            turret.update(0, frame, autoAim, -gamepad1.right_stick_x);
-            shooter.setManual(rpm, hood);
-
-            telemetry.addData("Distancia trig", "%.1f in", vision.getTrigDistanceIn());
-            telemetry.addData("Distancia 3D", "%.1f in", vision.get3dDistanceIn());
-            telemetry.addLine();
-            telemetry.addData("FILA", "{ %.0f, %.0f, %.2f },",
-                    frame != null ? frame.distanceIn
-                            : (vision.getLastTarget() != null ? vision.getLastTarget().distanceIn : Double.NaN),
-                    rpm, hood);
-            telemetry.addLine();
-            vision.addTelemetry(telemetry);
-            turret.addTelemetry(telemetry);
-            shooter.addTelemetry(telemetry);
-            telemetry.addData("Torreta fija", turret.isLocked() ? "SI" : "no");
-            telemetry.update();
+        if (robot == null || isStopRequested()) {
+            if (robot != null) robot.stop();
+            return;
         }
 
-        shooter.stop();
-        vision.stop();
+        try {
+            double rpm = ShotCfg.IDLE_RPM;
+            double delta = 0;
+            boolean autoAim = true;
+            boolean fireWasDown = false;
+
+            while (opModeIsActive()) {
+                long now = System.nanoTime();
+                if (gamepad1.dpadUpWasPressed()) rpm += 50;
+                if (gamepad1.dpadDownWasPressed()) rpm -= 50;
+                if (gamepad1.dpadRightWasPressed()) delta += 0.5;
+                if (gamepad1.dpadLeftWasPressed()) delta -= 0.5;
+                if (gamepad1.rightBumperWasPressed()) robot.flywheel.setEnabled(!robot.flywheel.isEnabled());
+                if (gamepad1.yWasPressed()) autoAim = !autoAim;
+                if (gamepad1.xWasPressed()) robot.vision.flipHive();
+                rpm = Math.max(0, rpm);
+                delta = Math.max(HoodCfg.DELTA_USE_MIN_DEG, Math.min(HoodCfg.DELTA_USE_MAX_DEG, delta));
+
+                CellTarget frame = robot.vision.update(now);
+                robot.turret.update(now, robot.updateYaw(), frame, autoAim, -gamepad1.right_stick_x);
+
+                BallType next = robot.feeder.nextBall();
+                BallType forGap = next.isBall() ? next : BallType.POLLEN;
+                robot.shooter.setManual(true, rpm, delta, forGap);
+                robot.shooter.update(now, Double.NaN, BallType.NONE);
+
+                boolean fireDown = gamepad1.right_trigger > 0.5;
+                boolean ready = robot.flywheel.isAtSpeed() && robot.hood.isReady(now)
+                        && robot.feeder.hasUpperBall() && !robot.feeder.isBusy()
+                        && (!autoAim || robot.turret.isLocked(now));
+                if (fireDown && !fireWasDown && ready) robot.feeder.requestShot();
+                fireWasDown = fireDown;
+                robot.feeder.update(now, false, false, robot.flywheel.consumeShotDip());
+
+                CellTarget last = robot.vision.getLastTarget();
+                double dist = last == null ? Double.NaN : last.distanceIn;
+                String table = forGap.needsNectarGap() ? "NECTAR_TABLE" : "POLLEN_TABLE";
+
+                telemetry.addData("Distancia (eje de la torreta)", "%.1f in", dist);
+                telemetry.addData("Distancia 3D (cámara)", "%.1f in", robot.vision.get3dDistanceIn());
+                telemetry.addData("Prueba de tamaño", "%+.2f  (- = arriba, + = abajo)", robot.vision.getSizeScore());
+                telemetry.addLine();
+                telemetry.addData("FILA para " + table, "{ %.0f, %.0f, %.1f },", dist, rpm, delta);
+                telemetry.addData("Listo", ready ? "SÍ (gatillo derecho)" : "no");
+                telemetry.addLine();
+                robot.vision.addTelemetry(telemetry, now);
+                robot.turret.addTelemetry(telemetry);
+                robot.shooter.addTelemetry(telemetry);
+                robot.feeder.addTelemetry(telemetry);
+                telemetry.update();
+            }
+        } finally {
+            robot.stop();
+        }
     }
 }
