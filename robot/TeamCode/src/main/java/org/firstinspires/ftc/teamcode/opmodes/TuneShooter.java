@@ -92,14 +92,19 @@ public class TuneShooter extends LinearOpMode {
                 robot.feeder.update(now, false, false, robot.flywheel.consumeShotDip());
 
                 CellTarget last = robot.vision.getLastTarget();
-                double dist = last == null ? Double.NaN : last.distanceIn;
+                double age = robot.vision.secondsSinceTarget(now);
+                double dist = last == null || age > 0.5 ? Double.NaN : last.distanceIn;
                 String table = forGap.needsNectarGap() ? "NECTAR_TABLE" : "POLLEN_TABLE";
 
                 telemetry.addData("Distancia (eje de la torreta)", "%.1f in", dist);
                 telemetry.addData("Distancia 3D (cámara)", "%.1f in", robot.vision.get3dDistanceIn());
                 telemetry.addData("Prueba de tamaño", "%+.2f  (- = arriba, + = abajo)", robot.vision.getSizeScore());
                 telemetry.addLine();
-                telemetry.addData("FILA para " + table, "{ %.0f, %.0f, %.1f },", dist, rpm, delta);
+                if (Double.isNaN(dist)) {
+                    telemetry.addData("FILA para " + table, "sin distancia reciente: no anotar");
+                } else {
+                    telemetry.addData("FILA para " + table, "{ %.0f, %.0f, %.1f },", dist, rpm, delta);
+                }
                 telemetry.addData("Listo", ready ? "SÍ (gatillo derecho)" : "no");
                 telemetry.addLine();
                 robot.vision.addTelemetry(telemetry, now);
