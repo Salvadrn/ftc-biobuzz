@@ -50,6 +50,7 @@ public class TuneFeeder extends LinearOpMode {
         long start = System.nanoTime();
         feeder.initHardware(start);
         boolean cycleMode = false;
+        double lastFilaPower = Double.NaN;
 
         while (opModeIsActive()) {
             long now = System.nanoTime();
@@ -57,6 +58,7 @@ public class TuneFeeder extends LinearOpMode {
                 cycleMode = !cycleMode;
                 feeder.stop();
                 if (fila instanceof PwmControl) ((PwmControl) fila).setPwmDisable();
+                lastFilaPower = Double.NaN;
             }
 
             if (cycleMode) {
@@ -70,11 +72,16 @@ public class TuneFeeder extends LinearOpMode {
                 double filaPower = 0;
                 if (gamepad1.right_trigger > 0.3) filaPower = FeederCfg.FILA_POWER_IN;
                 if (gamepad1.left_trigger > 0.3) filaPower = -FeederCfg.FILA_POWER_IN;
-                if (fila instanceof PwmControl) {
-                    if (filaPower != 0) ((PwmControl) fila).setPwmEnable();
-                    else ((PwmControl) fila).setPwmDisable();   // en 0 se arrastra
+                if (filaPower != lastFilaPower) {      // solo al cambiar: apagar borra la caché del SDK
+                    if (filaPower != 0) {
+                        if (fila instanceof PwmControl) ((PwmControl) fila).setPwmEnable();
+                        fila.setPower(filaPower);
+                    } else {
+                        fila.setPower(0);
+                        if (fila instanceof PwmControl) ((PwmControl) fila).setPwmDisable();   // en 0 se arrastra
+                    }
+                    lastFilaPower = filaPower;
                 }
-                fila.setPower(filaPower);
 
                 double elev = 0;
                 if (gamepad1.dpad_up) elev = FeederCfg.ELEVATOR_STAGE_POWER;
