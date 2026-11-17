@@ -69,6 +69,7 @@ public class IntakeF2 implements Intake {
 
     // Conteo y atascos
     private boolean throatWasActive = false;
+    private boolean throatCounted = false;
     private long throatSinceNs;
     private long mouthSinceNs = -1;
     private int unjamTries = 0;
@@ -222,17 +223,26 @@ public class IntakeF2 implements Intake {
         BallType seen = throatColor.read(nowNs);
         boolean pullingIn = state == State.PULLING;
 
-        // Conteo con el break-beam de la garganta: una pelota = cortar y volver a liberar
-        if (throatBall && !throatWasActive) throatSinceNs = nowNs;
-        if (!throatBall && throatWasActive && (nowNs - throatSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_MIN_S) {
-            if (pullingIn) {
-                entered++;
-                unjamTries = 0;
-                mouthSinceNs = -1;
-                if (warning.startsWith("atasco")) warning = "";
-            } else if (state == State.EJECTING) {
-                rejected++;
-            }
+        // Conteo con el break-beam de la garganta.
+        //  - Hacia adentro se cuenta al LLEGAR (haz cortado ≥ THROAT_MIN_S): la 4a pelota se
+        //    queda parada sobre el haz y nunca lo libera; contarla al salir la contaría dos
+        //    veces cuando después avance a la fila.
+        //  - Hacia afuera (reversa del piloto) se cuenta al LIBERAR: ya salió.
+        if (throatBall && !throatWasActive) {
+            throatSinceNs = nowNs;
+            throatCounted = false;
+        }
+        if (throatBall && !throatCounted && pullingIn
+                && (nowNs - throatSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_MIN_S) {
+            throatCounted = true;
+            entered++;
+            unjamTries = 0;
+            mouthSinceNs = -1;
+            if (warning.startsWith("atasco")) warning = "";
+        }
+        if (!throatBall && throatWasActive && state == State.EJECTING
+                && (nowNs - throatSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_MIN_S) {
+            rejected++;
         }
         throatWasActive = throatBall;
         if (seen.isBall()) lastType = seen;
