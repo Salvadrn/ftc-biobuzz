@@ -448,17 +448,20 @@ public class Sim {
         double t = 0;
         int shotsCounted = 0;
         boolean gapWrong = false;
+        BallType firingTruth = BallType.NONE;
+        Feeder.State prevState = f.getState();
         while (t < 15 && bw.launched < 4) {
             now += 10 * MS;
             t += 0.01;
-            BallType nextAtRequest = f.nextBall();
             if (f.hasUpperBall() && !f.isBusy()) f.requestShot();
+            BallType upperBefore = bw.upper;
             f.update(now, true, false, bw.dip);
             bw.dip = false;
             shotsCounted += f.consumeShots();
-            if (f.getState() == Feeder.State.FIRING && nextAtRequest.isBall() && nextAtRequest != bw.upper && bw.upper.isBall()) {
-                gapWrong = true;
-            }
+            if (f.getState() == Feeder.State.FIRING && prevState != Feeder.State.FIRING) firingTruth = upperBefore;
+            // Mientras dispara, el gap tiene que ser el de la pelota que sale, aunque el V3 ya no la vea
+            if (f.getState() == Feeder.State.FIRING && f.nextBall() != firingTruth) gapWrong = true;
+            prevState = f.getState();
             physics(bw, fila, copa, elev, 0.01, order);
         }
         for (int i = 0; i < 80; i++) {          // que se asiente
@@ -473,7 +476,7 @@ public class Sim {
                 "[NECTAR_RED, POLLEN, NECTAR_RED, POLLEN]"), order.toString());
         check("cuenta 4 tiros (G407)", shotsCounted == 4, shotsCounted + " tiros");
         check("nunca sube la copa con pelota esperando arriba", !bw.hazard, bw.hazardWhy);
-        check("la próxima pelota (para el gap) siempre es la de arriba", !gapWrong, "");
+        check("mientras dispara, el gap no cambia aunque el V3 ya no vea la pelota", !gapWrong, "");
         check("al terminar la fila queda apagada (PWM off)", !fila.pwmOn, "");
         check("al terminar la copa queda abajo y suelta", bw.copaMm < 0.5 && !copa.pwmOn,
                 String.format("%.1f mm, PWM %s", bw.copaMm, copa.pwmOn ? "on" : "off"));
@@ -655,5 +658,27 @@ public class Sim {
         }
         check("atasco: 3 pulsos de reversa y luego aviso", pulses == 3 && in.warning().startsWith("atasco"),
                 pulses + " pulsos, aviso '" + in.warning() + "'");
+
+        // Conteo en la garganta: la 4a pelota se queda parada sobre el haz
+        final boolean[] beam = {false};
+        Fakes.Motor m2 = new Fakes.Motor();
+        IntakeF2 in2 = new IntakeF2(m2.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
+                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> beam[0]), true),
+                new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0),
+                null, Alliance.RED);
+        in2.setCommand(Intake.Command.IN);
+        int counted = 0;
+        long n2 = 0;
+        boolean[] pattern = new boolean[300];
+        for (int i = 20; i < 40; i++) pattern[i] = true;      // pelota 1 pasa
+        for (int i = 80; i < 200; i++) pattern[i] = true;     // pelota 2 se queda parada (4a) y luego avanza
+        for (int i = 240; i < 260; i++) pattern[i] = true;    // pelota 3 pasa
+        for (boolean b : pattern) {
+            n2 += 10 * MS;
+            beam[0] = b;
+            in2.update(n2, false);
+            counted += in2.consumeEntered();
+        }
+        check("garganta: 3 pelotas = 3 cuentas, aunque una se quede sobre el haz", counted == 3, counted + " cuentas");
     }
 }
