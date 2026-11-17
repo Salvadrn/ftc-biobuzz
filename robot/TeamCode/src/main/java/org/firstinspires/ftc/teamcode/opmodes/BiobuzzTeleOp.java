@@ -82,7 +82,7 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
             robot.drive.drive(-gamepad1.left_stick_y * speed, gamepad1.left_stick_x * speed,
                     gamepad1.right_stick_x * speed);
 
-            // ----- botones (con | para leer los dos controles y no perder flancos) -----
+            // ----- botones (cada acción en un solo control: *WasPressed se consume al leerse) -----
             if (gamepad1.rightBumperWasPressed()) intakeOn = !intakeOn;
             if (gamepad2.rightBumperWasPressed()) robot.flywheel.setEnabled(!robot.flywheel.isEnabled());
             if (gamepad2.aWasPressed()) autoAim = !autoAim;
@@ -146,7 +146,8 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
             robot.shooter.addTelemetry(telemetry);
             robot.feeder.addTelemetry(telemetry);
             robot.intake.addTelemetry(telemetry);
-            if (robot.imuFailedReads() > 0) telemetry.addData("IMU", "%d lecturas fallidas", robot.imuFailedReads());
+            telemetry.addData("Yaw", "%.1f°  (girar a la izquierda debe subirlo)%s", yaw,
+                    robot.imuFailedReads() > 0 ? String.format("  · %d lecturas fallidas", robot.imuFailedReads()) : "");
             telemetry.addData("Ciclo", "%.0f ms", loopTimer.milliseconds());
             loopTimer.reset();
             telemetry.update();
