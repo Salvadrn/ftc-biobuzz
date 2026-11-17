@@ -63,7 +63,7 @@ public class Feeder {
 
     // Fila
     private FilaMode filaMode = FilaMode.STOP;
-    private boolean filaPwmOn = true;
+    private boolean filaCommanded = false;
     private long filaPushStartNs = -1;
     private long filaUnjamUntilNs = -1;
     private int filaUnjamTries = 0;
@@ -307,20 +307,23 @@ public class Feeder {
         setFila(want);
     }
 
+    /**
+     * Solo manda comandos cuando cambia el modo. Ojo con el SDK (LynxServoController, leído
+     * con javap): apagar el PWM borra su caché y el siguiente setPower, aunque sea 0, lo
+     * vuelve a prender. Por eso en STOP se manda 0 primero, se apaga después y ya no se
+     * toca hasta el siguiente cambio. En 0 con el PWM prendido la fila se arrastra (banda
+     * muerta de 4 µs).
+     */
     private void setFila(FilaMode mode) {
+        if (mode == filaMode && filaCommanded) return;
         filaMode = mode;
+        filaCommanded = true;
         if (mode == FilaMode.STOP) {
             fila.setPower(0);
-            if (filaPwmOn && fila instanceof PwmControl) {
-                ((PwmControl) fila).setPwmDisable();   // en 0 se arrastra por la banda muerta de 4 µs
-            }
-            filaPwmOn = false;
+            if (fila instanceof PwmControl) ((PwmControl) fila).setPwmDisable();
             return;
         }
-        if (!filaPwmOn && fila instanceof PwmControl) {
-            ((PwmControl) fila).setPwmEnable();
-        }
-        filaPwmOn = true;
+        if (fila instanceof PwmControl) ((PwmControl) fila).setPwmEnable();
         fila.setPower(mode == FilaMode.IN ? FeederCfg.FILA_POWER_IN : -FeederCfg.FILA_POWER_IN);
     }
 
