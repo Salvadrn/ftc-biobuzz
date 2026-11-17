@@ -208,6 +208,12 @@
 
   <div class="meta">ftc-biobuzz · docs/cableado.html · SDK 12.0 · hoja v2, 2026-09-24</div>
   <h1>¿Cómo se conecta el robot BIOBUZZ?</h1>
+  <div class="aviso" style="border-left-color:#b3261e">
+    <strong>Desactualizada (17-nov-2026).</strong> Esta hoja es del diseño de septiembre, antes del CAD v99.
+    Sigue sirviendo para lo eléctrico general (XT30 en cadena, RS485, pares de servos de 2 A, Limelight en el USB 3.0),
+    pero los puertos y los nombres ya no son estos: el robot ahora tiene 7 motores, 5 servos, 3 sensores de color,
+    3 break-beams, un sensor magnético y la cámara C270. La tabla vigente está en el README del repositorio.
+  </div>
   <p class="sub">
     Qué va en cada puerto del Control Hub y del Expansion Hub y por qué, por qué la torreta y el hood
     no pueden compartir par de servos, a qué USB va el Limelight y cómo evitar que su cable se jale cuando gira la torreta,
@@ -478,7 +484,7 @@
 
           <!-- ======== TORRETA ======== -->
           <rect x="326" y="20" width="226" height="130" rx="8" class="zone"/>
-          <text x="336" y="40" class="t12 m i-act">TORRETA · ±110° ya calibrada</text>
+          <text x="336" y="40" class="t12 m i-act">TORRETA · ±110°, sin calibrar</text>
           <rect x="360" y="54" width="180" height="68" rx="6" class="bx bx-data"/>
           <text x="450" y="74" class="t13 m c">Limelight 3A</text>
           <text x="450" y="92" class="t12 c"><tspan class="i-pow">entra 4.1–5.75 V</tspan> <tspan class="i-ok">✓</tspan></text>
