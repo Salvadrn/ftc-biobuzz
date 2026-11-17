@@ -1,121 +1,99 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
-import com.qualcomm.robotcore.hardware.HardwareMap;
-import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.util.Range;
-
 import org.firstinspires.ftc.robotcore.external.Telemetry;
-import org.firstinspires.ftc.teamcode.Config.Names;
-import org.firstinspires.ftc.teamcode.Config.ShooterCfg;
+import org.firstinspires.ftc.teamcode.BallType;
+import org.firstinspires.ftc.teamcode.Config.ShotCfg;
 import org.firstinspires.ftc.teamcode.util.InterpTable;
 
 /**
- * Flywheel de velocidad variable y hood de ángulo variable.
- * Los dos se ajustan solos con la distancia que da el Limelight, usando SHOT_TABLE.
+ * Junta flywheel y hood: con la distancia y el tipo de la próxima pelota decide rpm,
+ * gap e inclinación del hood.
  *
- * El flywheel usa el control de velocidad del hub (RUN_USING_ENCODER + setVelocity),
- * así que cada motor del flywheel necesita su cable de encoder conectado.
+ * La POLLEN (2.8 in) y la NECTAR (3.6 in) no vuelan igual, así que cada una tiene su tabla.
  */
 public class Shooter {
-    private final DcMotorEx flywheel;
-    private final DcMotorEx flywheel2;   // null si el robot solo tiene uno
-    private final Servo hood;
+    public final Flywheel flywheel;
+    public final Hood hood;
 
-    private final InterpTable rpmTable;
-    private final InterpTable hoodTable;
+    private final InterpTable pollenRpm, pollenDelta, nectarRpm, nectarDelta;
 
-    private boolean enabled = false;
-    private double targetRpm = 0;
-    private double hoodPosition;
+    private BallType nextBall = BallType.NONE;
+    private double distanceIn = Double.NaN;
+    private boolean manual = false;
 
-    public Shooter(HardwareMap hardwareMap) {
-        flywheel = hardwareMap.get(DcMotorEx.class, Names.FLYWHEEL);
-        flywheel2 = hardwareMap.tryGet(DcMotorEx.class, Names.FLYWHEEL_2);
-        hood = hardwareMap.get(Servo.class, Names.HOOD_SERVO);
-
-        setupMotor(flywheel, ShooterCfg.FLYWHEEL_REVERSED);
-        if (flywheel2 != null) setupMotor(flywheel2, ShooterCfg.FLYWHEEL_2_REVERSED);
-
-        double[][] table = ShooterCfg.SHOT_TABLE;
-        double[][] rpmPoints = new double[table.length][];
-        double[][] hoodPoints = new double[table.length][];
-        for (int i = 0; i < table.length; i++) {
-            rpmPoints[i] = new double[]{table[i][0], table[i][1]};
-            hoodPoints[i] = new double[]{table[i][0], table[i][2]};
-        }
-        rpmTable = new InterpTable(rpmPoints);
-        hoodTable = new InterpTable(hoodPoints);
-        hoodPosition = hoodTable.get(rpmTable.minX());
+    public Shooter(Flywheel flywheel, Hood hood) {
+        this.flywheel = flywheel;
+        this.hood = hood;
+        pollenRpm = column(ShotCfg.POLLEN_TABLE, 1);
+        pollenDelta = column(ShotCfg.POLLEN_TABLE, 2);
+        nectarRpm = column(ShotCfg.NECTAR_TABLE, 1);
+        nectarDelta = column(ShotCfg.NECTAR_TABLE, 2);
     }
 
-    private static void setupMotor(DcMotorEx motor, boolean reversed) {
-        motor.setDirection(reversed ? DcMotorSimple.Direction.REVERSE : DcMotorSimple.Direction.FORWARD);
-        motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);   // que frene solo, sin forzar
-        motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motor.setVelocityPIDFCoefficients(ShooterCfg.VEL_P, ShooterCfg.VEL_I, ShooterCfg.VEL_D, ShooterCfg.VEL_F);
+    private static InterpTable column(double[][] table, int col) {
+        double[][] pts = new double[table.length][];
+        for (int i = 0; i < table.length; i++) pts[i] = new double[]{table[i][0], table[i][col]};
+        return new InterpTable(pts);
     }
-
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
-    public boolean isEnabled() { return enabled; }
 
     /**
      * Llamar una vez por ciclo.
-     * @param distanceIn distancia al CELL en pulgadas, o NaN si ahorita no se conoce.
-     *                   Sin distancia se conserva el último ajuste.
+     * @param distanceIn distancia a la CELL desde el eje de la torreta, NaN si no se sabe
+     * @param next       pelota que sigue en salir (decide gap y tabla); NONE = no cambiar el gap
      */
-    public void update(double distanceIn) {
-        if (!Double.isNaN(distanceIn)) {
-            targetRpm = rpmTable.get(distanceIn);
-            hoodPosition = hoodTable.get(distanceIn);
-        } else if (targetRpm == 0) {
-            targetRpm = ShooterCfg.IDLE_RPM;
+    public void update(long nowNs, double distanceIn, BallType next) {
+        this.distanceIn = distanceIn;
+        if (next != null && next != BallType.NONE) nextBall = next;
+
+        if (!manual) {
+            hood.setGapFor(nextBall);
+            boolean nectar = nextBall.needsNectarGap() && nextBall != BallType.NONE;
+            if (!Double.isNaN(distanceIn)) {
+                flywheel.setTargetRpm((nectar ? nectarRpm : pollenRpm).get(distanceIn));
+                hood.setDelta((nectar ? nectarDelta : pollenDelta).get(distanceIn));
+            } else if (flywheel.getTargetRpm() == 0) {
+                flywheel.setTargetRpm(ShotCfg.IDLE_RPM);
+            }
         }
-        apply();
+        flywheel.update();
+        hood.update(nowNs);
     }
 
-    /** Para "Tune: Tiro": fija RPM y hood a mano, ignorando la tabla. */
-    public void setManual(double rpm, double hoodPos) {
-        targetRpm = Math.max(0, rpm);
-        hoodPosition = hoodPos;
-        apply();
-    }
-
-    private void apply() {
-        hoodPosition = Range.clip(hoodPosition, ShooterCfg.HOOD_MIN, ShooterCfg.HOOD_MAX);
-        hood.setPosition(hoodPosition);
-
-        if (enabled) {
-            double ticksPerSecond = targetRpm / 60.0 * ShooterCfg.TICKS_PER_FLYWHEEL_REV;
-            flywheel.setVelocity(ticksPerSecond);
-            if (flywheel2 != null) flywheel2.setVelocity(ticksPerSecond);
-        } else {
-            flywheel.setPower(0);
-            if (flywheel2 != null) flywheel2.setPower(0);
+    /** Para "Tune: Tiro": rpm y δ a mano, ignorando las tablas. */
+    public void setManual(boolean on, double rpm, double deltaDeg, BallType ball) {
+        manual = on;
+        if (on) {
+            nextBall = ball;
+            hood.setGapFor(ball);
+            flywheel.setTargetRpm(rpm);
+            hood.setDelta(deltaDeg);
         }
     }
 
-    public double getRpm() {
-        return flywheel.getVelocity() / ShooterCfg.TICKS_PER_FLYWHEEL_REV * 60.0;
+    /** ¿La distancia está dentro de lo que la tabla de esa pelota cubre? */
+    public boolean distanceInTable(double d) {
+        if (Double.isNaN(d)) return false;
+        InterpTable t = nextBall.needsNectarGap() ? nectarRpm : pollenRpm;
+        return d >= t.minX() - ShotCfg.TABLE_MARGIN_IN && d <= t.maxX() + ShotCfg.TABLE_MARGIN_IN;
     }
 
-    public double getTargetRpm() { return targetRpm; }
-    public double getHoodPosition() { return hoodPosition; }
+    /** Flywheel en velocidad, hood en su lugar y una distancia que la tabla cubre. */
+    public boolean isReady(long nowNs) {
+        return flywheel.isAtSpeed() && hood.isReady(nowNs)
+                && (manual || distanceInTable(distanceIn));
+    }
 
-    /** true cuando el flywheel está prendido y ya alcanzó las RPM pedidas. */
-    public boolean isReady() {
-        return enabled && targetRpm > 0 && Math.abs(getRpm() - targetRpm) < ShooterCfg.RPM_TOLERANCE;
+    public BallType getNextBall() { return nextBall; }
+
+    public void addTelemetry(Telemetry telemetry) {
+        flywheel.addTelemetry(telemetry);
+        hood.addTelemetry(telemetry);
+        if (!manual && !Double.isNaN(distanceIn) && !distanceInTable(distanceIn)) {
+            telemetry.addLine("!! Distancia fuera de la tabla de tiro");
+        }
     }
 
     public void stop() {
-        enabled = false;
-        apply();
-    }
-
-    public void addTelemetry(Telemetry telemetry) {
-        telemetry.addData("Flywheel", "%s  %.0f / %.0f rpm", enabled ? "ON" : "off", getRpm(), targetRpm);
-        telemetry.addData("Hood", "%.3f", hoodPosition);
+        flywheel.stop();
     }
 }
