@@ -89,8 +89,15 @@ final class Fakes {
     }
 
     // ---------------- servo de posición ----------------
+    /**
+     * Imita al LynxServoController del SDK 12.0 (leído con javap): un comando de posición
+     * DISTINTO al último manda el pulso y vuelve a encender el PWM; uno igual no manda
+     * nada; apagar el PWM borra la caché, así que el siguiente comando, aunque sea igual,
+     * lo vuelve a encender.
+     */
     static final class PosServo {
         double position;
+        Double cached = null;
         boolean pwmOn = true;
         boolean everCommanded = false;
         PwmControl.PwmRange range = PwmControl.PwmRange.defaultRange;
@@ -100,12 +107,21 @@ final class Fakes {
                     new Class[]{Servo.class, PwmControl.class},
                     (p, m, a) -> {
                         switch (m.getName()) {
-                            case "setPosition": position = (Double) a[0]; everCommanded = true; pwmOn = true; return null;
+                            case "setPosition": {
+                                double v = (Double) a[0];
+                                position = v;
+                                everCommanded = true;
+                                if (cached == null || cached != v) {
+                                    cached = v;
+                                    pwmOn = true;
+                                }
+                                return null;
+                            }
                             case "getPosition": return position;
                             case "setPwmRange": range = (PwmControl.PwmRange) a[0]; return null;
                             case "getPwmRange": return range;
                             case "setPwmEnable": pwmOn = true; return null;
-                            case "setPwmDisable": pwmOn = false; return null;
+                            case "setPwmDisable": if (pwmOn) cached = null; pwmOn = false; return null;
                             case "isPwmEnabled": return pwmOn;
                             case "getDirection": return Servo.Direction.FORWARD;
                             case "toString": return "FakeServo";
@@ -124,8 +140,10 @@ final class Fakes {
     }
 
     // ---------------- servo continuo ----------------
+    /** Mismas reglas que PosServo: setPower es un comando de posición del servo. */
     static final class ContServo {
         double power;
+        Double cached = null;
         boolean pwmOn = true;
         PwmControl.PwmRange range = PwmControl.PwmRange.defaultRange;
 
@@ -134,12 +152,20 @@ final class Fakes {
                     new Class[]{CRServo.class, PwmControl.class},
                     (p, m, a) -> {
                         switch (m.getName()) {
-                            case "setPower": power = (Double) a[0]; return null;
+                            case "setPower": {
+                                double v = (Double) a[0];
+                                power = v;
+                                if (cached == null || cached != v) {
+                                    cached = v;
+                                    pwmOn = true;
+                                }
+                                return null;
+                            }
                             case "getPower": return power;
                             case "setPwmRange": range = (PwmControl.PwmRange) a[0]; return null;
                             case "getPwmRange": return range;
                             case "setPwmEnable": pwmOn = true; return null;
-                            case "setPwmDisable": pwmOn = false; return null;
+                            case "setPwmDisable": if (pwmOn) cached = null; pwmOn = false; return null;
                             case "isPwmEnabled": return pwmOn;
                             case "toString": return "FakeCRServo";
                             case "hashCode": return System.identityHashCode(p);
