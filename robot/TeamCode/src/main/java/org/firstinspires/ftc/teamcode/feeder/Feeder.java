@@ -58,6 +58,7 @@ public class Feeder {
 
     // Disparo
     private boolean shotRequested = false;
+    private BallType firingBall = BallType.NONE;   // la que está saliendo: su gap no se toca
     private long dipNs = -1, upperLostNs = -1;
     private int shotsDone = 0;
 
@@ -149,6 +150,7 @@ public class Feeder {
             case IDLE:
                 if (shotRequested && upper.isBall() && copaDown) {
                     enter(State.FIRING, nowNs);
+                    firingBall = upper;
                     dipNs = -1;
                     upperLostNs = -1;
                 } else if (!upper.isBall() && copaSeated) {          // la fila se detiene sola al subir la copa
@@ -354,8 +356,13 @@ public class Feeder {
     public double getCopaMm() { return copaCmdMm; }
     public String getWarning() { return warning; }
 
-    /** La pelota que sigue en salir: la de arriba; si no hay, la de la copa. */
+    /**
+     * La pelota para la que debe estar el hood. Mientras dispara, la que está saliendo:
+     * el V3 de arriba la deja de ver cuando todavía va por el hood, y cambiar el gap con
+     * una NECTAR adentro la apretaría. Si no, la de arriba; si no hay, la de la copa.
+     */
     public BallType nextBall() {
+        if (state == State.FIRING) return firingBall;
         return upperSensor.hasBall() ? upperSensor.last() : copaSensor.last();
     }
 
