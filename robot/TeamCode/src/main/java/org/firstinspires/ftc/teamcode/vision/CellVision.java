@@ -19,59 +19,98 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Lee el Limelight y entrega el CELL de nuestra alianza que mejor se ve.
+ * Lee el Limelight y entrega la CELL de ARRIBA de nuestra alianza, vista desde el eje
+ * de la torreta.
  *
- * Los tags de BIOBUZZ se mueven con el HIVE, así que no sirven para ubicar al robot
- * en el campo. Aquí solo se usan para apuntar: ángulo al centro del CELL y distancia.
+ * Tres cosas que aprendimos en la auditoría del 27-oct y aquí ya se respetan:
+ *  1. getControlHubTimeStampNanos() del SDK es hora de reloj (ms x 1e6), no la base de
+ *     System.nanoTime(). El instante de la foto se calcula con getStaleness() y las
+ *     latencias del Limelight.
+ *  2. El SDK crea un resultado nuevo en cada consulta (100 Hz) aunque la cámara no haya
+ *     tomado otra foto (≤ 50 fps con tags). La foto se reconoce por getTimestamp(), el
+ *     reloj del propio Limelight.
+ *  3. Desde donde se tira se ven las dos CELLS de la alianza. HiveGeometry y HiveBelief
+ *     deciden cuál es la de arriba.
+ *
+ * Los tags de BIOBUZZ se mueven con el HIVE: no sirven para ubicar al robot en el campo.
  */
 public class CellVision {
-    private final Limelight3A limelight;
+    private final Limelight3A limelight;    // null en la simulación
     private final Alliance alliance;
     private final ClusterSolver solver = new ClusterSolver(VisionCfg.SLOPE_MEMORY_S);
+    private final HiveBelief belief;
 
-    private long lastResultStampNs = -1;
-    private Cell currentCell;
+    private double lastLlTimestamp = Double.NaN;
+    private long lastPipelineFixNs = 0;
 
     // Para telemetría y para "Tune: Tiro"
     private CellTarget lastTarget;
     private long lastTargetNs;
-    private double lastLatencyMs;
-    private double lastTrigDistanceIn = Double.NaN;
+    private double lastLatencyMs = Double.NaN;
     private double last3dDistanceIn = Double.NaN;
+    private double lastSizeScore = Double.NaN;
+    private String status = "sin datos";
+    private boolean wrongPipeline = false;
 
     public CellVision(HardwareMap hardwareMap, Alliance alliance) {
         this.alliance = alliance;
+        this.belief = new HiveBelief(alliance, VisionCfg.UPDOWN_CONFIRM_FRAMES);
         limelight = hardwareMap.get(Limelight3A.class, Names.LIMELIGHT);
-        limelight.setPollRateHz(VisionCfg.POLL_RATE_HZ);
+        limelight.setPollRateHz(VisionCfg.POLL_RATE_HZ);   // antes de start(): con el Limelight corriendo se ignora
         limelight.pipelineSwitch(VisionCfg.APRILTAG_PIPELINE);
-        limelight.start();   // sin esto getLatestResult() devuelve null
+        limelight.start();
+    }
+
+    /** Para la simulación: sin hardware, se alimenta con process(). */
+    public CellVision(Alliance alliance) {
+        this.alliance = alliance;
+        this.belief = new HiveBelief(alliance, VisionCfg.UPDOWN_CONFIRM_FRAMES);
+        this.limelight = null;
     }
 
     /**
      * Llamar una vez por ciclo.
-     * @return el objetivo SOLO si llegó una foto nueva con tags de nuestra alianza.
-     *         Devuelve null si no hay foto nueva o si no se ve ningún CELL nuestro.
+     * @return el objetivo SOLO si llegó una foto nueva con la CELL de arriba a la vista.
      */
-    public CellTarget update() {
+    public CellTarget update(long nowNs) {
+        if (limelight == null) return null;
         LLResult result = limelight.getLatestResult();
-        if (result == null || !result.isValid()) return null;
+        CellTarget target = process(result, nowNs);
+        if (wrongPipeline && nowNs - lastPipelineFixNs > 3_000_000_000L) {
+            lastPipelineFixNs = nowNs;
+            limelight.pipelineSwitch(VisionCfg.APRILTAG_PIPELINE);
+        }
+        return target;
+    }
 
-        long stampNs = result.getControlHubTimeStampNanos();
-        if (stampNs == lastResultStampNs) return null;   // la misma foto del ciclo pasado
-        lastResultStampNs = stampNs;
+    /** Toda la lógica, sin hardware. Público para la simulación. */
+    public CellTarget process(LLResult result, long nowNs) {
+        if (result == null) return null;
 
-        long nowNs = System.nanoTime();
-        double pipelineMs = result.getCaptureLatency() + result.getTargetingLatency();
-        long captureNs = stampNs - (long) (pipelineMs * 1e6);
-        lastLatencyMs = (nowNs - captureNs) / 1e6;
-        if (lastLatencyMs > VisionCfg.MAX_LATENCY_MS) return null;
+        double ts = result.getTimestamp();
+        if (ts == lastLlTimestamp) return null;          // la misma foto del Limelight
+        lastLlTimestamp = ts;
 
-        // Separa los tags por CELL, quedándose solo con los de nuestra alianza
+        wrongPipeline = result.getPipelineIndex() != VisionCfg.APRILTAG_PIPELINE;
+        if (!result.isValid()) {
+            status = "no se ven tags";
+            return null;
+        }
+
+        double ageMs = Math.max(0, result.getStaleness())
+                + result.getCaptureLatency() + result.getTargetingLatency();
+        lastLatencyMs = ageMs;
+        if (ageMs > VisionCfg.MAX_LATENCY_MS) {
+            status = "foto vieja";
+            return null;
+        }
+        long captureNs = nowNs - (long) (ageMs * 1e6);
+
+        // Separa los tags por CELL, solo los de nuestra alianza
         Map<Cell, List<TagSighting>> byCell = new EnumMap<>(Cell.class);
         for (LLResultTypes.FiducialResult fr : result.getFiducialResults()) {
             Cell cell = Cell.fromTagId(fr.getFiducialId());
             if (cell == null || cell.alliance != alliance) continue;
-
             List<TagSighting> list = byCell.get(cell);
             if (list == null) {
                 list = new ArrayList<>();
@@ -79,112 +118,212 @@ public class CellVision {
             }
             list.add(new TagSighting(
                     cell.memberIndex(fr.getFiducialId()),
-                    fr.getTargetXDegrees(),
-                    fr.getTargetYDegrees(),
+                    fr.getTargetXDegreesNoCrosshair(),
+                    fr.getTargetYDegreesNoCrosshair(),
                     fr.getTargetArea(),
-                    horizontalDistance3d(fr.getTargetPoseCameraSpace())));
+                    tagHeight3d(fr.getTargetPoseCameraSpace())));
         }
-        if (byCell.isEmpty()) return null;
+        if (byCell.isEmpty()) {
+            status = "no se ven tags de " + alliance;
+            return null;
+        }
 
-        currentCell = chooseCell(byCell);
-        List<TagSighting> tags = byCell.get(currentCell);
+        belief.addEvidence(claimUpCell(byCell), lastReason);
 
-        ClusterSolver.Solution aim = solver.solve(currentCell, tags, nowNs);
+        Cell up = belief.upCell();
+        if (up == null) {
+            status = "no se sabe cuál CELL está arriba";
+            return null;
+        }
+        List<TagSighting> tags = byCell.get(up);
+        if (tags == null) {
+            status = "solo se ve la CELL de abajo";
+            return null;
+        }
 
-        lastTrigDistanceIn = trigDistance(aim.txDeg, aim.tyDeg);
-        last3dDistanceIn = mean3dDistance(tags);
-        double distance = VisionCfg.USE_3D_DISTANCE ? last3dDistanceIn : lastTrigDistanceIn;
+        ClusterSolver.Solution aim = solver.solve(up, tags, nowNs);
+        HiveGeometry.Ray ray = HiveGeometry.ray(aim.txDeg, aim.tyDeg, VisionCfg.CAMERA_PITCH_DEG);
+        double camDist = HiveGeometry.horizontalDistance(ray,
+                VisionCfg.TAG_ROW_HEIGHT_UP_IN - VisionCfg.CAMERA_HEIGHT_IN);
 
-        lastTarget = new CellTarget(currentCell, aim.txDeg, aim.tyDeg, distance,
-                tags.size(), aim.centered, captureNs);
+        last3dDistanceIn = mean3dDistance(result, up);
+        if (VisionCfg.USE_3D_DISTANCE && !Double.isNaN(last3dDistanceIn)) {
+            camDist = last3dDistanceIn;
+        }
+        if (Double.isNaN(camDist)) {
+            status = "la fila quedó bajo el horizonte de la cámara";
+            return null;
+        }
+
+        double[] axis = HiveGeometry.fromCameraToTurretAxis(ray.azimuthLeftDeg, camDist,
+                VisionCfg.CAMERA_BEHIND_AXIS_IN);
+        double bearing = axis[0] + VisionCfg.AIM_TRIM_DEG;
+
+        status = "ok";
+        lastTarget = new CellTarget(up, bearing, axis[1], tags.size(), aim.centered, captureNs);
         lastTargetNs = nowNs;
         return lastTarget;
     }
 
+    private String lastReason = "";
+
     /**
-     * Se queda con el CELL que ya se venía siguiendo mientras siga a la vista, para que
-     * la torreta no brinque entre los dos CELLS. Solo cambia si el otro muestra más tags.
+     * Decide con esta foto cuál CELL está arriba. Devuelve null si la foto no alcanza.
+     *
+     *  - Si se ven las dos filas, la de arriba se ve más alta: basta comparar elevaciones
+     *    (si la diferencia es clara).
+     *  - Con una sola fila: altura por la pose 3D (si está activada) o prueba de tamaño.
      */
-    private Cell chooseCell(Map<Cell, List<TagSighting>> byCell) {
-        Cell best = null;
-        int bestCount = 0;
-        double bestArea = 0;
-        for (Map.Entry<Cell, List<TagSighting>> e : byCell.entrySet()) {
-            int count = e.getValue().size();
-            double area = 0;
-            for (TagSighting t : e.getValue()) area += t.area;
-            if (count > bestCount || (count == bestCount && area > bestArea)) {
-                best = e.getKey();
-                bestCount = count;
-                bestArea = area;
+    private Cell claimUpCell(Map<Cell, List<TagSighting>> byCell) {
+        Cell[] both = Cell.ofAlliance(alliance);
+        List<TagSighting> a = byCell.get(both[0]);
+        List<TagSighting> b = byCell.get(both[1]);
+
+        if (a != null && b != null) {
+            double elevA = meanRay(a).elevationDeg;
+            double elevB = meanRay(b).elevationDeg;
+            if (Math.abs(elevA - elevB) >= VisionCfg.UPDOWN_ELEVATION_SPLIT_DEG) {
+                lastReason = "dos filas";
+                return elevA > elevB ? both[0] : both[1];
             }
         }
-        List<TagSighting> current = currentCell == null ? null : byCell.get(currentCell);
-        if (current != null && current.size() >= bestCount) return currentCell;
-        return best;
+
+        Cell claim = null;
+        for (Cell cell : both) {
+            List<TagSighting> tags = byCell.get(cell);
+            if (tags == null) continue;
+            Boolean isUp = classifySingle(tags);
+            if (isUp == null) continue;
+            Cell c = isUp ? cell : cell.partner();
+            if (claim != null && claim != c) {
+                lastReason = "fotos contradictorias";
+                return null;
+            }
+            claim = c;
+        }
+        return claim;
     }
 
-    /** Distancia horizontal con la altura conocida de los tags y el ángulo vertical. */
-    private static double trigDistance(double txDeg, double tyDeg) {
-        double elevationDeg = VisionCfg.CAMERA_PITCH_DEG + tyDeg;
-        if (elevationDeg < 2.0) return Double.NaN;   // casi horizontal: la fórmula se dispara
-        double forward = (VisionCfg.TAG_HEIGHT_IN - VisionCfg.CAMERA_HEIGHT_IN)
-                / Math.tan(Math.toRadians(elevationDeg));
-        // Si el objetivo no está centrado, la distancia real es un poco mayor
-        return forward / Math.cos(Math.toRadians(txDeg));
-    }
+    /** true = fila de arriba, false = fila de abajo, null = no se puede decir. */
+    private Boolean classifySingle(List<TagSighting> tags) {
+        double midHeight = 0.5 * (VisionCfg.TAG_ROW_HEIGHT_UP_IN + VisionCfg.TAG_ROW_HEIGHT_DOWN_IN);
 
-    /**
-     * Distancia horizontal a un tag a partir de su pose en el espacio de la cámara
-     * (x derecha, y abajo, z al frente), descontando la inclinación de la cámara.
-     */
-    private static double horizontalDistance3d(Pose3D pose) {
-        if (pose == null) return Double.NaN;
-        Position p = pose.getPosition().toUnit(DistanceUnit.INCH);
-        if (p.x == 0 && p.y == 0 && p.z == 0) return Double.NaN;   // 3D apagado en el pipeline
-        double pitch = Math.toRadians(VisionCfg.CAMERA_PITCH_DEG);
-        double forward = p.z * Math.cos(pitch) + p.y * Math.sin(pitch);
-        return Math.hypot(p.x, forward);
-    }
+        if (VisionCfg.USE_3D_FOR_UPDOWN) {
+            double sum = 0;
+            int n = 0;
+            for (TagSighting t : tags) {
+                if (!Double.isNaN(t.height3dIn)) {
+                    sum += t.height3dIn;
+                    n++;
+                }
+            }
+            if (n > 0) {
+                double h = sum / n;
+                if (Math.abs(h - midHeight) >= VisionCfg.UPDOWN_3D_MARGIN_IN) {
+                    lastReason = String.format("altura 3D %.0f in", h);
+                    return h > midHeight;
+                }
+            }
+        }
 
-    private static double mean3dDistance(List<TagSighting> tags) {
-        double sum = 0;
+        double scoreSum = 0;
         int n = 0;
         for (TagSighting t : tags) {
-            if (!Double.isNaN(t.distanceIn)) {
-                sum += t.distanceIn;
+            HiveGeometry.Ray r = HiveGeometry.ray(t.txDeg, t.tyDeg, VisionCfg.CAMERA_PITCH_DEG);
+            double s = HiveGeometry.upDownSizeScore(r, t.areaPct, VisionCfg.CAMERA_HEIGHT_IN,
+                    VisionCfg.TAG_ROW_HEIGHT_UP_IN, VisionCfg.TAG_ROW_HEIGHT_DOWN_IN,
+                    VisionCfg.TAG_AREA_K, VisionCfg.TAG_COS_VIEW);
+            if (!Double.isNaN(s)) {
+                scoreSum += s;
                 n++;
             }
+        }
+        if (n == 0) return null;
+        lastSizeScore = scoreSum / n;
+        if (Math.abs(lastSizeScore) < VisionCfg.UPDOWN_SIZE_MARGIN) return null;
+        lastReason = String.format("tamaño %+.2f", lastSizeScore);
+        return lastSizeScore < 0;
+    }
+
+    private static HiveGeometry.Ray meanRay(List<TagSighting> tags) {
+        double tx = 0, ty = 0;
+        for (TagSighting t : tags) {
+            tx += t.txDeg;
+            ty += t.tyDeg;
+        }
+        return HiveGeometry.ray(tx / tags.size(), ty / tags.size(), VisionCfg.CAMERA_PITCH_DEG);
+    }
+
+    /** Altura de un tag por la pose 3D del Limelight, o NaN si "Full 3D" está apagado. */
+    private static double tagHeight3d(Pose3D pose) {
+        if (pose == null) return Double.NaN;
+        Position p = pose.getPosition().toUnit(DistanceUnit.INCH);
+        if (p.x == 0 && p.y == 0 && p.z == 0) return Double.NaN;
+        return HiveGeometry.heightFromCameraSpace(p.y, p.z, VisionCfg.CAMERA_HEIGHT_IN, VisionCfg.CAMERA_PITCH_DEG);
+    }
+
+    /** Distancia horizontal promedio de la cámara a los tags de una CELL por la pose 3D. */
+    private static double mean3dDistance(LLResult result, Cell cell) {
+        double sum = 0;
+        int n = 0;
+        double p = Math.toRadians(VisionCfg.CAMERA_PITCH_DEG);
+        for (LLResultTypes.FiducialResult fr : result.getFiducialResults()) {
+            if (Cell.fromTagId(fr.getFiducialId()) != cell) continue;
+            Pose3D pose = fr.getTargetPoseCameraSpace();
+            if (pose == null) continue;
+            Position pos = pose.getPosition().toUnit(DistanceUnit.INCH);
+            if (pos.x == 0 && pos.y == 0 && pos.z == 0) continue;
+            double forward = pos.z * Math.cos(p) + pos.y * Math.sin(p);
+            sum += Math.hypot(pos.x, forward);
+            n++;
         }
         return n == 0 ? Double.NaN : sum / n;
     }
 
+    // ---------- piloto ----------
+
+    /** El piloto avisa que el HIVE se volteó (o que la visión eligió mal). */
+    public void flipHive() {
+        belief.flip();
+        solver.reset();
+    }
+
+    public Cell upCell() {
+        return belief.upCell();
+    }
+
+    // ---------- lectura ----------
+
     /** Último objetivo visto, aunque no sea de este ciclo. Puede ser null. */
     public CellTarget getLastTarget() { return lastTarget; }
 
-    public double secondsSinceTarget() {
-        return lastTarget == null ? Double.POSITIVE_INFINITY : (System.nanoTime() - lastTargetNs) / 1e9;
+    public double secondsSinceTarget(long nowNs) {
+        return lastTarget == null ? Double.POSITIVE_INFINITY : (nowNs - lastTargetNs) / 1e9;
     }
 
-    public double getTrigDistanceIn() { return lastTrigDistanceIn; }
     public double get3dDistanceIn() { return last3dDistanceIn; }
+    public double getSizeScore() { return lastSizeScore; }
+    public String getStatus() { return status; }
 
-    public void addTelemetry(Telemetry telemetry) {
-        if (!limelight.isConnected()) {
+    public void addTelemetry(Telemetry telemetry, long nowNs) {
+        if (limelight != null && !limelight.isConnected()) {
             telemetry.addLine("!! LIMELIGHT DESCONECTADO");
             return;
         }
-        if (lastTarget == null || secondsSinceTarget() > 0.5) {
-            telemetry.addData("Vision", "sin objetivo (%s)", alliance);
+        if (wrongPipeline) telemetry.addLine("!! El Limelight no está en el pipeline de AprilTags");
+        Cell up = belief.upCell();
+        telemetry.addData("HIVE", "arriba: %s (%s)", up == null ? "?" : up, belief.reason());
+        if (lastTarget == null || secondsSinceTarget(nowNs) > 0.5) {
+            telemetry.addData("Visión", status);
             return;
         }
-        telemetry.addData("Vision", "%s  tags %d/4%s", lastTarget.cell, lastTarget.tagCount,
+        telemetry.addData("Visión", "%s  tags %d/4%s", lastTarget.cell, lastTarget.tagCount,
                 lastTarget.centered ? "" : "  SIN CENTRAR");
-        telemetry.addData("  tx / ty", "%.1f / %.1f grados", lastTarget.txDeg, lastTarget.tyDeg);
-        telemetry.addData("  distancia", "%.1f in   retraso %.0f ms", lastTarget.distanceIn, lastLatencyMs);
+        telemetry.addData("  rumbo / dist", "%.1f° / %.1f in   retraso %.0f ms",
+                lastTarget.bearingDeg, lastTarget.distanceIn, lastLatencyMs);
     }
 
     public void stop() {
-        limelight.stop();
+        if (limelight != null) limelight.stop();
     }
 }
