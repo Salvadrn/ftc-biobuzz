@@ -103,6 +103,13 @@ public final class Config {
 
         /** Velocidad del control manual. */
         public static double MANUAL_SPEED_DEG_S = 90;
+
+        /**
+         * Con el objetivo detrás (fuera de ±105°), la torreta se queda en el tope del lado en
+         * que está mientras el objetivo no pase más de esto al otro lado de los 180°. Sin esto
+         * brinca de tope a tope con el ruido.
+         */
+        public static double BEHIND_HYSTERESIS_DEG = 30;
     }
 
     public static final class VisionCfg {
