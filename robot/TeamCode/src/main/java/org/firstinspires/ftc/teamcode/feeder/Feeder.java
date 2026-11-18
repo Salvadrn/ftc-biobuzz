@@ -360,12 +360,15 @@ public class Feeder {
         boolean copaBusy = state == State.COPA_UP || state == State.LIFT || state == State.COPA_DOWN
                 || !copaIsDown() || liftCheck;
 
-        // Atorada: se queda apagada hasta que algo cambie o pase el tiempo de espera
+        // Atorada: se queda apagada hasta que algo cambie (entonces vuelve a tener todos sus
+        // intentos) o pase el tiempo de espera (entonces, un solo empujón más)
         if (filaJammed) {
             boolean changed = filaHasBall != jamBeamWas || copaHasBall != jamCopaWas;
-            if (changed || filaReverse || (nowNs - filaJamSinceNs) / 1e9 >= FeederCfg.FILA_JAM_COOLDOWN_S) {
+            if (changed || filaReverse) {
                 filaJammed = false;
                 filaUnjamTries = 0;
+            } else if ((nowNs - filaJamSinceNs) / 1e9 >= FeederCfg.FILA_JAM_COOLDOWN_S) {
+                filaJammed = false;
             }
         }
 
