@@ -26,7 +26,8 @@ public class Flywheel {
     private double lastSentTicksPerS = Double.NaN;
 
     private double rpm = 0;            // leído una vez por ciclo
-    private double peakRpmSinceReady = 0;
+    private long lastAtSpeedNs = Long.MIN_VALUE / 2;
+    private double targetAtSpeed = Double.NaN;
     private boolean dipLatched = false;
 
     public Flywheel(HardwareMap hardwareMap) {
@@ -61,7 +62,7 @@ public class Flywheel {
     public double getTargetRpm() { return targetRpm; }
 
     /** Llamar una vez por ciclo: lee la velocidad UNA vez y manda la consigna si cambió. */
-    public void update() {
+    public void update(long nowNs) {
         rpm = motor.getVelocity() / FlywheelCfg.TICKS_PER_REV * 60.0;
         if (enabled) {
             double ticksPerS = targetRpm / 60.0 * FlywheelCfg.TICKS_PER_REV;
@@ -69,7 +70,7 @@ public class Flywheel {
                 motor.setVelocity(ticksPerS);
                 lastSentTicksPerS = ticksPerS;
             }
-            trackDip();
+            trackDip(nowNs);
         }
     }
 
@@ -77,21 +78,26 @@ public class Flywheel {
         motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         motor.setPower(0);
         lastSentTicksPerS = Double.NaN;
-        peakRpmSinceReady = 0;
+        targetAtSpeed = Double.NaN;
         dipLatched = false;
     }
 
     /**
      * Cuando una pelota pasa, la rueda pierde vueltas de golpe. Eso confirma el tiro.
-     * Se marca si, ya en velocidad, cae más de SHOT_DIP_RPM.
+     * Se marca si, habiendo estado en velocidad hace poco, cae más de SHOT_DIP_RPM debajo
+     * de la consigna de ese momento. Si la consigna cambió mucho desde entonces (la tabla
+     * pidió otras rpm), no se cuenta: subir la consigna no es un tiro.
      */
-    private void trackDip() {
+    private void trackDip(long nowNs) {
         if (isAtSpeed()) {
-            peakRpmSinceReady = Math.max(peakRpmSinceReady, rpm);
+            lastAtSpeedNs = nowNs;
+            targetAtSpeed = targetRpm;
         }
-        if (peakRpmSinceReady > 0 && rpm < peakRpmSinceReady - FlywheelCfg.SHOT_DIP_RPM) {
+        boolean recentlyAtSpeed = (nowNs - lastAtSpeedNs) / 1e9 <= 0.25 && !Double.isNaN(targetAtSpeed);
+        boolean sameTarget = Math.abs(targetRpm - targetAtSpeed) < FlywheelCfg.SHOT_DIP_RPM / 2;
+        if (recentlyAtSpeed && sameTarget && rpm < targetAtSpeed - FlywheelCfg.SHOT_DIP_RPM) {
             dipLatched = true;
-            peakRpmSinceReady = 0;
+            targetAtSpeed = Double.NaN;   // una caída = un tiro
         }
     }
 
