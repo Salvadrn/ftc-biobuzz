@@ -19,6 +19,12 @@ public interface Intake {
      */
     boolean initStep(long nowNs);
 
+    /**
+     * Quedó dentro del tamaño de inicio (R102). Puede ser false aunque initStep ya haya
+     * terminado: por ejemplo, si no encontró el índice o no llegó a 0°.
+     */
+    boolean isStartReady();
+
     /** Lo que pide el piloto. El intake puede no obedecer (lleno, atasco, NECTAR rival). */
     void setCommand(Command command);
 
@@ -33,6 +39,9 @@ public interface Intake {
 
     /** Pide reversa de la fila (para sacar una NECTAR rival, G408). */
     boolean wantsFilaReverse();
+
+    /** Pide que la fila no se mueva: hay una NECTAR rival atorada en la entrada (G408). */
+    default boolean holdsFila() { return false; }
 
     /** Pelotas que entraron desde la última consulta (para G407). */
     int consumeEntered();
