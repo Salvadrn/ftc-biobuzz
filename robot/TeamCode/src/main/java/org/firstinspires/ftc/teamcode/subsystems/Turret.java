@@ -44,6 +44,8 @@ public class Turret {
     private double targetFieldDeg = 0;
     private long lastSeenNs = 0;
     private double lastFrameBearingDeg = Double.NaN;
+    private double lastFrameDistanceIn = Double.NaN;
+    private boolean lastFramePrecise = false;
     private long lastFrameCaptureNs = Long.MIN_VALUE;
     private long settledSinceNs = -1;   // desde cuándo el estimado llegó a lo ordenado
 
@@ -123,6 +125,8 @@ public class Turret {
             }
             lastSeenNs = nowNs;
             lastFrameBearingDeg = newFrame.bearingDeg;
+            lastFrameDistanceIn = newFrame.distanceIn;
+            lastFramePrecise = newFrame.precise;
             lastFrameCaptureNs = newFrame.captureTimeNs;
         }
         if (hasTarget && (nowNs - lastSeenNs) / 1e9 > TurretCfg.TARGET_MEMORY_S) {
@@ -138,7 +142,15 @@ public class Turret {
             desiredDeg = commandedDeg + manualInput * TurretCfg.MANUAL_SPEED_DEG_S * dt;
         }
 
-        double limitedDeg = Range.clip(desiredDeg, minAngleDeg(), maxAngleDeg());
+        double min = minAngleDeg(), max = maxAngleDeg();
+        double limitedDeg = Range.clip(desiredDeg, min, max);
+        if (tracking && limitedDeg != desiredDeg) {
+            // Objetivo detrás: quedarse en el tope actual, no brincar al otro con el ruido
+            double edge = 180 - TurretCfg.BEHIND_HYSTERESIS_DEG;
+            boolean atMax = commandedDeg >= max - 1, atMin = commandedDeg <= min + 1;
+            if (atMax && limitedDeg == min && desiredDeg < -edge) limitedDeg = max;
+            if (atMin && limitedDeg == max && desiredDeg > edge) limitedDeg = min;
+        }
         atLimit = tracking && limitedDeg != desiredDeg;
 
         boolean bigEnough = Math.abs(limitedDeg - commandedDeg) > TurretCfg.DEADBAND_DEG;
@@ -167,15 +179,23 @@ public class Turret {
      * MAX_SPEED_DEG_S, el estimado se adelanta y solo la foto lo delata.
      */
     public boolean isLocked(long nowNs) {
-        if (!positionKnown || !hasTarget || atLimit) return false;
+        if (!positionKnown || !hasTarget || atLimit || !lastFramePrecise) return false;
         boolean seenRecently = (nowNs - lastSeenNs) / 1e9 < TurretCfg.LOCK_FRAME_MAX_AGE_S;
         boolean settled = Math.abs(commandedDeg - estimatedDeg) < TurretCfg.LOCK_TOLERANCE_DEG;
+        double tol = aimToleranceDeg();
         // La foto tiene que ser de DESPUÉS de que la torreta (según el modelo) llegó, con
         // margen por si el servo real es más lento, y tiene que decir que el error es chico.
         boolean photoAfterSettle = settledSinceNs >= 0
                 && lastFrameCaptureNs >= settledSinceNs + (long) (TurretCfg.LOCK_PHOTO_MARGIN_S * 1e9);
-        boolean photoAgrees = photoAfterSettle && Math.abs(lastFrameBearingDeg) < TurretCfg.LOCK_TOLERANCE_DEG;
-        return seenRecently && settled && photoAgrees && Math.abs(aimErrorDeg()) < TurretCfg.LOCK_TOLERANCE_DEG;
+        boolean photoAgrees = photoAfterSettle && Math.abs(lastFrameBearingDeg) < tol;
+        return seenRecently && settled && photoAgrees && Math.abs(aimErrorDeg()) < tol;
+    }
+
+    /** Error de puntería permitido en grados: LOCK_TOLERANCE_IN en la abertura, según la distancia. */
+    public double aimToleranceDeg() {
+        if (Double.isNaN(lastFrameDistanceIn) || lastFrameDistanceIn <= 1) return TurretCfg.LOCK_TOLERANCE_DEG;
+        double deg = Math.toDegrees(Math.atan(TurretCfg.LOCK_TOLERANCE_IN / lastFrameDistanceIn));
+        return Range.clip(deg, TurretCfg.LOCK_TOL_MIN_DEG, TurretCfg.LOCK_TOL_MAX_DEG);
     }
 
     /** true si el objetivo quedó fuera del giro de la torreta: hay que rotar el chasis. */
