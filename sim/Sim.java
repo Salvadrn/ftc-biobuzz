@@ -61,6 +61,8 @@ public class Sim {
         System.out.println("== CELL de arriba y distancia, de punta a punta con LLResult del SDK");
         testUpDown(false);
         testUpDown(true);
+        System.out.println("== el piloto y la visión: quién manda en cuál CELL está arriba");
+        testHiveOverride();
         System.out.println("== tiempos del Limelight");
         testVisionTiming();
         System.out.println("== torreta en lazo cerrado (Limelight simulado, retraso, chasis girando)");
@@ -229,6 +231,35 @@ public class Sim {
                 String.format("peor %.2f in de lado (%.2f°); %d fotos de un tag (no fijan)", worstLat, worstBear, imprecise));
         check("distancia a la abertura de 30 a 110 in (" + tag + ")", worstDist < 3.0, String.format("peor %.2f in", worstDist));
         VisionCfg.UPDOWN_CONFIRM_FRAMES = saved;
+    }
+
+    static void testHiveOverride() {
+        Random rnd = new Random(3);
+        double[] rc = FieldSim.rowCenter(true);
+        FieldSim.Cam cam = new FieldSim.Cam(rc[0] + 70, rc[1] + 10, Math.atan2(-10, -70),
+                VisionCfg.CAMERA_BEHIND_AXIS_IN, VisionCfg.CAMERA_HEIGHT_IN, VisionCfg.CAMERA_PITCH_DEG);
+        CellVision v = new CellVision(Alliance.RED);
+        check("arranca con la CELL de arriba de la fig. 10-2", v.upCell() == Cell.RED_AUDIENCE, "" + v.upCell());
+        v.flipHive();                              // el piloto dice que se volteó; el campo dice que no
+        long now = 1_000_000_000L;
+        double ts = 1000;
+        int switchedAt = -1;
+        for (int i = 1; i <= 20; i++) {
+            now += 33 * MS;
+            ts += 33;
+            v.process(FieldSim.result(cam, Cell.RED_AUDIENCE, ts, 5, false, rnd, 0.1, 0.1), now);
+            if (v.upCell() == Cell.RED_AUDIENCE && switchedAt < 0) switchedAt = i;
+        }
+        check("el piloto manda hasta UPDOWN_OVERRIDE_FRAMES fotos seguidas en contra",
+                switchedAt == VisionCfg.UPDOWN_OVERRIDE_FRAMES, switchedAt + " fotos");
+        v.flipHive();
+        for (int i = 0; i < 20; i++) {             // fotos en contra, pero sueltas
+            now += 400 * MS;
+            ts += 400;
+            v.process(FieldSim.result(cam, Cell.RED_AUDIENCE, ts, 5, false, rnd, 0.1, 0.1), now);
+        }
+        check("fotos en contra separadas por más de UPDOWN_STREAK_GAP_S no se juntan", v.upCell() == Cell.RED_SCORING,
+                "" + v.upCell());
     }
 
     // =========================================================== tiempos
