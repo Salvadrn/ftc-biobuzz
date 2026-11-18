@@ -173,28 +173,13 @@ public final class Config {
         public static String START_UP_BLUE = "BLUE_SCORING";
 
         /**
-         * Distancia: false = trigonometría con la altura de la fila (no necesita "Full 3D").
-         * true = pose 3D del Limelight (necesita "Full 3D" en el pipeline).
+         * Si la pose 3D está disponible ("Full 3D" en el pipeline), con un solo tag se usa la
+         * altura del tag para decidir arriba/abajo. Con 2 o más tags se usa su separación.
          */
-        public static boolean USE_3D_DISTANCE = false;
-
-        /** Si la pose 3D está disponible, usar la altura del tag para decidir arriba/abajo. */
         public static boolean USE_3D_FOR_UPDOWN = true;
-        public static double UPDOWN_3D_MARGIN_IN = 4.0;
 
         /** Fotos seguidas que tienen que coincidir para cambiar cuál CELL está arriba. */
         public static int UPDOWN_CONFIRM_FRAMES = 3;
-
-        /** Si se ven las dos filas, la de arriba tiene que verse al menos esto más alta. */
-        public static double UPDOWN_ELEVATION_SPLIT_DEG = 5.0;
-
-        /** Prueba de tamaño: |puntaje| mínimo para decidir (1 = lo esperado exacto). */
-        public static double UPDOWN_SIZE_MARGIN = 0.35;
-
-        /** CALC: área (% de imagen) de un tag de 3.25 in a 1 in, con el FOV del Limelight 3A. */
-        public static double TAG_AREA_K = 1327.5;
-        /** CALC: coseno típico del ángulo entre la cara del tag y la cámara desde donde se tira. */
-        public static double TAG_COS_VIEW = 0.8;
 
         /** Segundos que se recuerda la geometría de la fila para corregir con un solo tag. */
         public static double SLOPE_MEMORY_S = 1.0;
@@ -364,8 +349,19 @@ public final class Config {
         public static double FIRE_TIMEOUT_S = 1.0;
         public static double LIFT_TIMEOUT_S = 1.5;
 
+        /**
+         * Una caída de rpm cuando la pelota todavía se ve arriba más de esto después no es el
+         * tiro (golpe, cambio de consigna): se descarta.
+         */
+        public static double DIP_EARLY_S = 0.15;
+
         /** Intentos de rellenar que pueden fallar seguidos antes de esperar al piloto. */
         public static int REFILL_MAX_FAILS = 2;
+        /**
+         * Tras un rellenado fallido, con la copa abajo se espera esto para ver si la pelota
+         * regresó a la copa. Si no regresó, se quedó en el tubo: se detiene a la primera.
+         */
+        public static double LIFT_CHECK_S = 0.3;
 
         /** Después de "fila atorada" se apaga; vuelve a intentar al cambiar algo o tras esto. */
         public static double FILA_JAM_COOLDOWN_S = 3.0;
