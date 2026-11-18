@@ -34,6 +34,8 @@ final class Fakes {
         double pos, vel;             // estado físico (cuentas, cuentas/s)
         int modeChanges = 0;
         boolean targetSetBeforeRunToPosition = true;
+        double overshoot = 0;                        // cuentas de sobrepaso en RUN_TO_POSITION
+        int overshotTarget = Integer.MIN_VALUE;
 
         DcMotorEx proxy() {
             return (DcMotorEx) Proxy.newProxyInstance(Fakes.class.getClassLoader(), new Class[]{DcMotorEx.class},
@@ -78,6 +80,11 @@ final class Fakes {
                     double err = target - pos;
                     double v = Math.abs(power) * maxTicksPerS;
                     double step = Math.min(Math.abs(err), v * dt);
+                    // Como el hub real: al llegar se pasa unas cuentas (una vez por objetivo) y regresa
+                    if (overshoot > 0 && err != 0 && step == Math.abs(err) && overshotTarget != target) {
+                        step += overshoot;
+                        overshotTarget = target;
+                    }
                     vel = Math.signum(err) * (dt > 0 ? step / dt : 0);
                     break;
                 }
