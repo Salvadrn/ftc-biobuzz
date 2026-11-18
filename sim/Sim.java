@@ -359,7 +359,28 @@ public class Sim {
         return (us - HoodCfg.ANGLE_ZERO_US) / HoodCfg.ANGLE_US_PER_DEG;
     }
 
-    static double[] runHood(double gapSpeed, double angleSpeed, double gapRate) {
+    /** Límites de choque del CAD v104 (δ efectivo) según el gap, interpolados. */
+    static double limelightLimit(double gap) {
+        return interp3(gap, -30.8, -24.9, -18.3);
+    }
+
+    static double flatTopLimit(double gap) {
+        return interp3(gap, 35.4, 40.1, 44.5);
+    }
+
+    static double interp3(double gap, double atPollen, double atMid, double atNectar) {
+        double t = Math.max(0, Math.min(1, gap / HoodCfg.GAP_NECTAR_DEG));   // 0 POLLEN, 1 NECTAR
+        return t <= 0.5 ? atPollen + (atMid - atPollen) * t / 0.5 : atMid + (atNectar - atMid) * (t - 0.5) / 0.5;
+    }
+
+    /**
+     * Hood con dos servos de verdad: cada uno sigue su comando con retraso (constante de
+     * tiempo tau) y velocidad máxima. Regresa {margen mínimo a la Limelight, margen mínimo a
+     * las FlatTop, gap del primer comando, ángulo del primer comando, posiciones ok, listo,
+     * tiempo máximo de un cambio de gap}. gapAlive/angleAlive = false simula un servo muerto.
+     */
+    static double[] runHood(double gapSpeed, double gapTau, double angleSpeed, double angleTau,
+                            boolean gapAlive, boolean angleAlive, double gapRate) {
         double savedRate = HoodCfg.GAP_RATE_DEG_S;
         HoodCfg.GAP_RATE_DEG_S = gapRate;
         Fakes.PosServo gs = new Fakes.PosServo(), as = new Fakes.PosServo();
@@ -371,44 +392,66 @@ public class Sim {
         long now = 0;
         hood.start(now);
         double firstGap = gapDegFromUs(gs.us()), firstAng = angleDegFromUs(as.us());
-        double minDelta = 99, maxDelta = -99;
+        double minLl = 99, minFt = 99, worstChange = 0;
         boolean posOk = true;
         Object[][] plan = {{BallType.POLLEN, 0.0}, {BallType.NECTAR_RED, 0.0}, {BallType.NECTAR_RED, -10.0},
-                {BallType.POLLEN, -10.0}, {BallType.NECTAR_BLUE, -5.0}, {BallType.POLLEN, 0.0}};
+                {BallType.POLLEN, -10.0}, {BallType.NECTAR_BLUE, -5.0}, {BallType.POLLEN, 0.0},
+                {BallType.NECTAR_RED, -10.0}, {BallType.POLLEN, 0.0}};
         for (Object[] step : plan) {
             hood.setGapFor((BallType) step[0]);
             hood.setDelta((Double) step[1]);
-            for (int i = 0; i < 200; i++) {
+            double changeTime = 0;
+            boolean ready = false;
+            for (int i = 0; i < 300; i++) {
                 now += 5 * MS;
                 hood.update(now);
                 double dt = 0.005;
                 double gTarget = gapDegFromUs(gs.us()), aTarget = angleDegFromUs(as.us());
-                gap += Math.max(-gapSpeed * dt, Math.min(gapSpeed * dt, gTarget - gap));
-                ang += Math.max(-angleSpeed * dt, Math.min(angleSpeed * dt, aTarget - ang));
+                if (gapAlive) gap = follow(gap, gTarget, gapSpeed, gapTau, dt);
+                if (angleAlive) ang = follow(ang, aTarget, angleSpeed, angleTau, dt);
                 double delta = gap + ang;
-                minDelta = Math.min(minDelta, delta);
-                maxDelta = Math.max(maxDelta, delta);
+                minLl = Math.min(minLl, delta - limelightLimit(gap));
+                minFt = Math.min(minFt, flatTopLimit(gap) - delta);
                 posOk &= gs.position >= 0 && gs.position <= 1 && as.position >= 0 && as.position <= 1;
+                if (!ready && hood.isReady(now)) { ready = true; changeTime = i * dt; }
             }
+            worstChange = Math.max(worstChange, ready ? changeTime : 99);
         }
         HoodCfg.GAP_RATE_DEG_S = savedRate;
-        return new double[]{minDelta, maxDelta, firstGap, firstAng, posOk ? 1 : 0, hood.isReady(now) ? 1 : 0};
+        return new double[]{minLl, minFt, firstGap, firstAng, posOk ? 1 : 0, hood.isReady(now) ? 1 : 0, worstChange};
+    }
+
+    /** Servo: primer orden con constante tau y velocidad máxima. */
+    static double follow(double x, double target, double maxSpeed, double tau, double dt) {
+        double want = (target - x) * (1 - Math.exp(-dt / tau));
+        double lim = maxSpeed * dt;
+        return x + Math.max(-lim, Math.min(lim, want));
     }
 
     static void testHood() {
-        double[] r = runHood(180, 240, HoodCfg.GAP_RATE_DEG_S);
+        double[] r = runHood(180, 0.03, 240, 0.03, true, true, HoodCfg.GAP_RATE_DEG_S);
         check("arranca mandando donde quedó (NECTAR), sin brinco",
                 Math.abs(r[2] - HoodCfg.GAP_NECTAR_DEG) < 0.01 && Math.abs(r[3] + HoodCfg.GAP_NECTAR_DEG) < 0.01,
                 String.format("gap %.1f°, ángulo %.1f°", r[2], r[3]));
-        check("δ real nunca sale de -11..+11 (choques en -20 y +35.4)", r[0] > -11 && r[1] < 11,
-                String.format("δ real de %.1f° a %.1f°", r[0], r[1]));
+        check("servos parejos: lejos de la Limelight y de las FlatTop", r[0] > 8 && r[1] > 20,
+                String.format("margen %.1f° a la Limelight, %.1f° a las FlatTop", r[0], r[1]));
         check("posiciones de servo siempre dentro de 0..1", r[4] == 1, "");
         check("listo al terminar", r[5] == 1, "");
-        double[] slowGap = runHood(120, 240, HoodCfg.GAP_RATE_DEG_S);
-        check("con el servo de gap a la mitad de velocidad, sigue seguro", slowGap[0] > -11 && slowGap[1] < 11,
-                String.format("δ real de %.1f° a %.1f°", slowGap[0], slowGap[1]));
-        double[] noRamp = runHood(120, 240, 100000);
-        System.out.printf("      (referencia: sin rampa, δ real iría de %.1f° a %.1f°)%n", noRamp[0], noRamp[1]);
+        check("un cambio de gap tarda menos de 1.2 s", r[6] < 1.2, String.format("%.2f s el peor", r[6]));
+        double[] gapLate = runHood(120, 0.10, 240, 0.02, true, true, HoodCfg.GAP_RATE_DEG_S);
+        check("servo de gap lento y atrasado: sigue lejos de los dos", gapLate[0] > 5 && gapLate[1] > 15,
+                String.format("margen %.1f° / %.1f°", gapLate[0], gapLate[1]));
+        double[] angLate = runHood(240, 0.02, 120, 0.10, true, true, HoodCfg.GAP_RATE_DEG_S);
+        check("servo de ángulo lento y atrasado: sigue lejos de los dos", angLate[0] > 5 && angLate[1] > 15,
+                String.format("margen %.1f° / %.1f°", angLate[0], angLate[1]));
+        // Un servo muerto a media transición: sin sensor de posición no se puede evitar.
+        // Se reporta para el CAD: un tope físico de δ protegería la Limelight.
+        double[] gapDead = runHood(180, 0.03, 240, 0.03, false, true, HoodCfg.GAP_RATE_DEG_S);
+        double[] angDead = runHood(180, 0.03, 240, 0.03, true, false, HoodCfg.GAP_RATE_DEG_S);
+        System.out.printf("      (referencia, servo de gap muerto: margen %.1f° a la Limelight y %.1f° a las FlatTop)%n",
+                gapDead[0], gapDead[1]);
+        System.out.printf("      (referencia, servo de ángulo muerto: margen %.1f° a la Limelight y %.1f° a las FlatTop)%n",
+                angDead[0], angDead[1]);
     }
 
     // =========================================================== alimentador
