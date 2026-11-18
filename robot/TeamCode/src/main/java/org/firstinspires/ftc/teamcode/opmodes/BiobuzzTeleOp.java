@@ -130,8 +130,10 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
                     && robot.shooter.isReady(now)
                     && robot.feeder.hasUpperBall()
                     && !robot.feeder.isBusy();
+            // Empujón: sin mira ni distancia, pero con el flywheel en velocidad y el hood quieto
             boolean forceReady = robot.flywheel.isEnabled()
-                    && robot.shooter.isReady(now)
+                    && robot.flywheel.isAtSpeed()
+                    && robot.hood.isReady(now)
                     && !robot.feeder.isBusy();
             if (gamepad2.right_trigger > 0.5) {
                 if (readyToFire) robot.feeder.requestShot();
