@@ -26,6 +26,9 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
  * GAMEPAD 2 (artillero)
  *   bumper derecho         flywheel sí/no
  *   gatillo derecho        sostener: dispara cada vez que todo está listo
+ *   gatillo izquierdo      sostener: empujar con el elevador aunque arriba no se vea pelota
+ *                          (sacar una atorada en el hood; flywheel en velocidad, sin mira)
+ *   B                      "el camino está libre": quita los bloqueos del alimentador
  *   A                      auto-apuntado sí/no (arranca en sí)
  *   Y                      torreta al frente (apaga el auto-apuntado)
  *   X                      "el HIVE se volteó": cambia cuál CELL está arriba
@@ -56,6 +59,10 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
                 telemetry.addData("Precargadas", "%d  (gamepad 2 dpad arriba/abajo)", preload);
                 telemetry.addData("IMU", !robot.hasImu() ? "NO ENCONTRADO: la torreta no compensa giros"
                         : robot.imuInitOk() ? "ok" : "!! no inicializó");
+                if (!robot.hoodStateFound()) {
+                    telemetry.addLine("!! Sin archivo del hood: se supuso gap POLLEN y δ de casa. "
+                            + "Si no está así, ponlo a mano antes de INIT.");
+                }
                 robot.intake.addTelemetry(telemetry);
                 robot.hood.addTelemetry(telemetry);
                 telemetry.update();
@@ -76,6 +83,7 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
 
         while (opModeIsActive()) {
             long now = System.nanoTime();
+            robot.beginLoop();
 
             // ----- chasis -----
             double speed = gamepad1.right_trigger > 0.3 ? DriveCfg.SLOW_FACTOR : 1.0;
@@ -91,6 +99,7 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
                 robot.turret.center();
             }
             if (gamepad2.xWasPressed()) robot.vision.flipHive();
+            if (gamepad2.bWasPressed()) robot.feeder.release();
             if (gamepad2.dpadUpWasPressed()) robot.inventory.set(robot.inventory.count() + 1);
             if (gamepad2.dpadDownWasPressed()) robot.inventory.set(robot.inventory.count() - 1);
 
@@ -121,13 +130,18 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
                     && robot.shooter.isReady(now)
                     && robot.feeder.hasUpperBall()
                     && !robot.feeder.isBusy();
+            boolean forceReady = robot.flywheel.isEnabled()
+                    && robot.shooter.isReady(now)
+                    && !robot.feeder.isBusy();
             if (gamepad2.right_trigger > 0.5) {
                 if (readyToFire) robot.feeder.requestShot();
+            } else if (gamepad2.left_trigger > 0.5) {
+                if (forceReady) robot.feeder.forceShot();
             } else {
                 robot.feeder.cancelShot();
             }
             robot.feeder.update(now, robot.intake.isFeeding(), robot.intake.wantsFilaReverse(),
-                    robot.flywheel.consumeShotDip());
+                    robot.intake.holdsFila(), robot.flywheel.consumeShotDip(), robot.flywheel.isEnabled());
             robot.updateInventory();
 
             if (readyToFire && !wasReady) {
