@@ -5,6 +5,7 @@ import org.firstinspires.ftc.teamcode.Alliance;
 import org.firstinspires.ftc.teamcode.BallType;
 import org.firstinspires.ftc.teamcode.Config;
 import org.firstinspires.ftc.teamcode.Config.FeederCfg;
+import org.firstinspires.ftc.teamcode.Config.FlywheelCfg;
 import org.firstinspires.ftc.teamcode.Config.HoodCfg;
 import org.firstinspires.ftc.teamcode.Config.IntakeF2Cfg;
 import org.firstinspires.ftc.teamcode.Config.SensorCfg;
@@ -15,6 +16,7 @@ import org.firstinspires.ftc.teamcode.intake.Intake;
 import org.firstinspires.ftc.teamcode.intake.IntakeF2;
 import org.firstinspires.ftc.teamcode.sensors.BallSensor;
 import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
+import org.firstinspires.ftc.teamcode.subsystems.Flywheel;
 import org.firstinspires.ftc.teamcode.subsystems.Hood;
 import org.firstinspires.ftc.teamcode.subsystems.Turret;
 import org.firstinspires.ftc.teamcode.util.ColorClassifier;
@@ -68,11 +70,24 @@ public class Sim {
         testTurretInitSettle();
         System.out.println("== hood: ley de los dos servos");
         testHood();
+        System.out.println("== flywheel: caída de rpm = tiro");
+        testFlywheelDip();
         System.out.println("== alimentador: fila, copa y elevador");
         testFeeder();
+        System.out.println("== alimentador: fallas");
+        testFeederUpperFault();
+        testFeederFlicker();
+        testFeederStuckInHood();
+        testFeederFlywheelOff();
+        testFeederRefillLimit();
+        testFeederFilaJam();
         System.out.println("== intake F2");
         testIntakeParking();
+        testIntakeFullFromPulling();
         testIntakeRejectAndUnjam();
+        testIntakeRivalCount();
+        testIntakeRivalStays();
+        testIntakeBounce();
 
         System.out.println(fails == 0 ? "\nTODO OK" : "\nFALLAS: " + fails);
         System.exit(fails == 0 ? 0 : 1);
@@ -156,13 +171,19 @@ public class Sim {
     }
 
     // =========================================================== arriba/abajo
+    /*
+     * La visión arranca creyendo lo del manual (fig. 10-2: arriba la roja del lado de la
+     * audiencia). Para separar "decidió mal" de "no tuvo con qué decidir":
+     *  A: arriba está RED_SCORING (lo contrario de lo que cree): si cambia, decidió bien.
+     *  B: arriba está RED_AUDIENCE (lo que ya cree): si cambia, decidió MAL.
+     */
     static void testUpDown(boolean full3d) {
         int saved = VisionCfg.UPDOWN_CONFIRM_FRAMES;
         VisionCfg.UPDOWN_CONFIRM_FRAMES = 1;
         Random rnd = new Random(11);
-        int right = 0, wrong = 0, undecided = 0, total = 0, uncentered = 0;
+        int right = 0, wrong = 0, undecided = 0, total = 0, imprecise = 0;
         double worstDist = 0, worstBear = 0, worstLat = 0;
-        String wrongCases = "";
+        String wrongCases = "", undecidedCases = "";
         for (double dist = 26; dist <= 130; dist += 4)
             for (double phi : new double[]{0, 20, -35, 50, -60})
                 for (double aimOff : new double[]{0, 12, -18}) {
@@ -172,33 +193,41 @@ public class Sim {
                     double heading = Math.atan2(rc[1] - ay, rc[0] - ax) + Math.toRadians(aimOff);
                     FieldSim.Cam cam = new FieldSim.Cam(ax, ay, heading, VisionCfg.CAMERA_BEHIND_AXIS_IN,
                             VisionCfg.CAMERA_HEIGHT_IN, VisionCfg.CAMERA_PITCH_DEG);
-                    LLResult r = FieldSim.result(cam, Cell.RED_SCORING, 1000, 5, full3d, rnd, 0.1, 0.15);
-                    if (r == null || r.getFiducialResults().isEmpty()) continue;
+                    LLResult rA = FieldSim.result(cam, Cell.RED_SCORING, 1000, 5, full3d, rnd, 0.1, 0.15);
+                    if (rA == null || rA.getFiducialResults().isEmpty()) continue;
                     total++;
-                    CellVision v = new CellVision(Alliance.RED);
-                    CellTarget t = v.process(r, 1_000_000_000L);
-                    Cell up = v.upCell();
-                    if (up == null) { undecided++; continue; }
-                    if (up != Cell.RED_SCORING) {
+                    CellVision vA = new CellVision(Alliance.RED);
+                    CellTarget t = vA.process(rA, 1_000_000_000L);
+                    if (vA.upCell() == Cell.RED_SCORING) {
+                        right++;
+                    } else {
+                        undecided++;
+                        if (undecidedCases.length() < 120) undecidedCases += String.format(" [d%.0f φ%.0f off%.0f]", dist, phi, aimOff);
+                    }
+
+                    LLResult rB = FieldSim.result(cam, Cell.RED_AUDIENCE, 1000, 5, full3d, rnd, 0.1, 0.15);
+                    CellVision vB = new CellVision(Alliance.RED);
+                    vB.process(rB, 1_000_000_000L);
+                    if (vB.upCell() != Cell.RED_AUDIENCE) {
                         wrong++;
                         if (wrongCases.length() < 160) wrongCases += String.format(" [d%.0f φ%.0f off%.0f]", dist, phi, aimOff);
-                        continue;
                     }
-                    right++;
-                    if (t != null && !t.centered) uncentered++;
-                    if (t != null && t.centered) {
-                        double[] truth = FieldSim.truthFromAxis(ax, ay, heading);
-                        worstBear = Math.max(worstBear, Math.abs(t.bearingDeg - truth[0]));
-                        worstLat = Math.max(worstLat, truth[1] * Math.abs(Math.tan(Math.toRadians(t.bearingDeg - truth[0]))));
-                        if (dist >= 30 && dist <= 110) worstDist = Math.max(worstDist, Math.abs(t.distanceIn - truth[1]));
-                    }
+
+                    if (t == null || t.cell != Cell.RED_SCORING) continue;
+                    if (!t.precise) { imprecise++; continue; }   // un solo tag: no fija, no se mide
+                    double[] truth = FieldSim.truthApertureFromAxis(ax, ay, heading);
+                    worstBear = Math.max(worstBear, Math.abs(t.bearingDeg - truth[0]));
+                    worstLat = Math.max(worstLat, truth[1] * Math.abs(Math.tan(Math.toRadians(t.bearingDeg - truth[0]))));
+                    if (dist >= 30 && dist <= 110) worstDist = Math.max(worstDist, Math.abs(t.distanceIn - truth[1]));
                 }
         String tag = full3d ? "con Full 3D" : "sin 3D";
-        check("CELL de arriba nunca confundida con la de abajo (" + tag + ")", wrong == 0,
-                String.format("bien %d, mal %d, sin decidir %d de %d%s", right, wrong, undecided, total, wrongCases));
-        check("puntería al centro de la fila (" + tag + ")", worstLat < 1.5,
-                String.format("peor %.2f in de lado (%.2f°); %d fotos de un solo tag sin centrar", worstLat, worstBear, uncentered));
-        check("distancia de 30 a 110 in (" + tag + ")", worstDist < 3.0, String.format("peor %.2f in", worstDist));
+        check("CELL de arriba: nunca decide la equivocada (" + tag + ")", wrong == 0,
+                String.format("mal %d de %d%s", wrong, total, wrongCases));
+        check("CELL de arriba: decide con una foto en casi todas (" + tag + ")", right >= 0.95 * total,
+                String.format("bien %d, sin decidir %d de %d%s", right, undecided, total, undecidedCases));
+        check("puntería a la abertura con 2+ tags (" + tag + ")", worstLat < 1.5,
+                String.format("peor %.2f in de lado (%.2f°); %d fotos de un tag (no fijan)", worstLat, worstBear, imprecise));
+        check("distancia a la abertura de 30 a 110 in (" + tag + ")", worstDist < 3.0, String.format("peor %.2f in", worstDist));
         VisionCfg.UPDOWN_CONFIRM_FRAMES = saved;
     }
 
@@ -254,7 +283,7 @@ public class Sim {
 
         double errorDeg() {
             double heading = Math.toRadians(yaw + trueTurret);
-            return FieldSim.truthFromAxis(axisX, axisY, heading)[0];
+            return FieldSim.truthApertureFromAxis(axisX, axisY, heading)[0];
         }
 
         /** Avanza 10 ms con el chasis girando a yawRate °/s. */
@@ -463,6 +492,18 @@ public class Sim {
         boolean hazard = false;
         String hazardWhy = "";
         boolean dip = false;
+
+        // Fallas a propósito
+        double t = 0;
+        double fireNeedS = 0.12;          // empuje que necesita la de arriba para salir
+        boolean stickInHood = false;      // sale de la vista del V3 y se atora antes del flywheel (sin caída)
+        BallType hood = BallType.NONE;    // la atorada entre la etapa de arriba y el flywheel
+        boolean liftBlocked = false;      // la de la copa nunca sube (se queda en la copa)
+        boolean liftLoses = false;        // la de la copa sale pero se queda en el tubo
+        BallType tube = BallType.NONE;
+        boolean copaBlocked = false;      // la fila no puede meter la pelota a la copa
+        double flickerFromS = -1, flickerToS = -1;   // el V3 de arriba no la ve en este rato
+        double maxCopaMm = 0, prevCopaMm = 0;
     }
 
     static void testFeeder() {
@@ -498,7 +539,7 @@ public class Sim {
             t += 0.01;
             if (f.hasUpperBall() && !f.isBusy()) f.requestShot();
             BallType upperBefore = bw.upper;
-            f.update(now, true, false, bw.dip);
+            f.update(now, true, false, false, bw.dip, true);
             bw.dip = false;
             shotsCounted += f.consumeShots();
             if (f.getState() == Feeder.State.FIRING && prevState != Feeder.State.FIRING) firingTruth = upperBefore;
@@ -509,7 +550,7 @@ public class Sim {
         }
         for (int i = 0; i < 80; i++) {          // que se asiente
             now += 10 * MS;
-            f.update(now, false, false, bw.dip);
+            f.update(now, false, false, false, bw.dip, true);
             bw.dip = false;
             shotsCounted += f.consumeShots();
             physics(bw, fila, copa, elev, 0.01, order);
@@ -537,6 +578,7 @@ public class Sim {
 
     static void physics(BallWorld bw, Fakes.ContServo fila, Fakes.PosServo copa, Fakes.Motor elev,
                         double dt, List<BallType> order) {
+        bw.t += dt;
         // Copa: el servo sigue el pulso a ~236 mm/s; sin PWM se queda (abajo, en el piso)
         if (copa.pwmOn && copa.everCommanded) {
             double us = copa.us();
@@ -544,11 +586,18 @@ public class Sim {
             double s = 236 * dt;
             bw.copaMm += Math.max(-s, Math.min(s, targetMm - bw.copaMm));
         }
+        boolean copaRising = bw.copaMm > bw.prevCopaMm + 1e-9;
+        bw.prevCopaMm = bw.copaMm;
+        bw.maxCopaMm = Math.max(bw.maxCopaMm, bw.copaMm);
         if (bw.copaMm > 57) { bw.hazard = true; bw.hazardWhy = "copa contra el tope"; }
         double ePow = elev.power;
         if (bw.copaMm > 40 && bw.upper.isBall() && bw.copa.isBall() && Math.abs(ePow) < 0.05) {
             bw.hazard = true;
             bw.hazardWhy = String.format("copa a %.0f mm con pelota arriba y motor parado", bw.copaMm);
+        }
+        if (copaRising && bw.copaMm > 40 && (bw.hood.isBall() || bw.tube.isBall())) {
+            bw.hazard = true;
+            bw.hazardWhy = String.format("copa subiendo a %.0f mm con una pelota atorada encima", bw.copaMm);
         }
 
         // Fila
@@ -556,7 +605,7 @@ public class Sim {
         if (fp > 0.5) {
             bw.filaPushS += dt;
             if (bw.filaPushS >= 0.3) {
-                if (bw.fila.isBall() && !bw.copa.isBall() && bw.copaMm < 1) {
+                if (bw.fila.isBall() && !bw.copa.isBall() && bw.copaMm < 1 && !bw.copaBlocked) {
                     bw.copa = bw.fila; bw.fila = BallType.NONE; bw.filaPushS = 0;
                 } else if (!bw.fila.isBall() && bw.throat.isBall()) {
                     bw.fila = bw.throat; bw.throat = BallType.NONE; bw.filaPushS = 0;
@@ -569,9 +618,22 @@ public class Sim {
         // Elevador
         if (ePow > 0.5 && bw.upper.isBall()) {
             bw.fireS += dt;
-            if (bw.fireS >= 0.12) {
-                order.add(bw.upper);
+            if (bw.fireS >= bw.fireNeedS) {
+                if (bw.stickInHood) {             // sale de la vista y se atora: sin caída de rpm
+                    bw.hood = bw.upper;
+                } else {
+                    order.add(bw.upper);
+                    bw.launched++;
+                    bw.dip = true;
+                }
                 bw.upper = BallType.NONE;
+                bw.fireS = 0;
+            }
+        } else if (ePow > 0.5 && bw.hood.isBall() && !bw.stickInHood) {   // el empujón saca la atorada
+            bw.fireS += dt;
+            if (bw.fireS >= bw.fireNeedS) {
+                order.add(bw.hood);
+                bw.hood = BallType.NONE;
                 bw.launched++;
                 bw.dip = true;
                 bw.fireS = 0;
@@ -579,10 +641,13 @@ public class Sim {
         } else {
             bw.fireS = 0;
         }
-        if (ePow > 0.1 && bw.copaMm >= 50 && bw.copa.isBall() && !bw.upper.isBall()) {
+        if (ePow > 0.1 && bw.copaMm >= 50 && bw.copa.isBall() && !bw.upper.isBall() && !bw.liftBlocked) {
             bw.liftS += dt;
             if (bw.liftS >= 0.25) {
-                bw.upper = bw.copa; bw.copa = BallType.NONE; bw.liftS = 0;
+                if (bw.liftLoses) bw.tube = bw.copa;
+                else bw.upper = bw.copa;
+                bw.copa = BallType.NONE;
+                bw.liftS = 0;
             }
         } else {
             bw.liftS = 0;
@@ -684,7 +749,7 @@ public class Sim {
         }
         check("G408: NECTAR rival adentro -> reversa del intake y de la fila", filaReverse,
                 String.format("%.2f s de reversa", reverseS));
-        check("G408: se cuenta una sola vez aunque se siga viendo", in.consumeRejected() == 1, "");
+        check("G408: una rival que nunca se sumó no se resta", in.consumeRejected() == 0 && in.consumeEntered() == 0, "");
 
         // Atasco en la boca: pelota en BB1 sin que la garganta cuente
         seen[0] = BallType.NONE;
@@ -723,5 +788,313 @@ public class Sim {
             counted += in2.consumeEntered();
         }
         check("garganta: 3 pelotas = 3 cuentas, aunque una se quede sobre el haz", counted == 3, counted + " cuentas");
+    }
+    // =========================================================== flywheel
+    static void testFlywheelDip() {
+        Fakes.Motor m = new Fakes.Motor();
+        Flywheel fw = new Flywheel(m.proxy());
+        fw.setEnabled(true);
+        double tpr = FlywheelCfg.TICKS_PER_REV;
+        long now = 0;
+        double target = 3000;
+        fw.setTargetRpm(target);
+        for (int i = 0; i < 50; i++) { now += 10 * MS; m.vel = target / 60 * tpr; fw.update(now); }
+        fw.consumeShotDip();
+        boolean falseDip = false;
+        for (int i = 0; i < 200; i++) {          // la consigna baja 400 rpm/s; la rueda va 150 rpm atrás
+            now += 10 * MS;
+            target -= 4;
+            fw.setTargetRpm(target);
+            m.vel = (target + 150) / 60 * tpr;
+            fw.update(now);
+            if (fw.consumeShotDip()) falseDip = true;
+        }
+        check("flywheel: bajar la consigna sin pelota no es un tiro", !falseDip, "");
+        for (int i = 0; i < 50; i++) { now += 10 * MS; m.vel = target / 60 * tpr; fw.update(now); fw.consumeShotDip(); }
+        int dips = 0;
+        for (int i = 0; i < 40; i++) {           // cae 400 rpm 50 ms y se recupera
+            now += 10 * MS;
+            m.vel = (i < 5 ? target - 400 : target) / 60 * tpr;
+            fw.update(now);
+            if (fw.consumeShotDip()) dips++;
+        }
+        check("flywheel: una caída de 400 rpm a velocidad es un tiro, una vez", dips == 1, dips + " caídas");
+    }
+
+    // =========================================================== alimentador: fallas
+    static final class FeederRig {
+        final BallWorld bw = new BallWorld();
+        final Fakes.ContServo fila = new Fakes.ContServo();
+        final Fakes.PosServo copa = new Fakes.PosServo();
+        final Fakes.Motor elev = new Fakes.Motor();
+        final ArrayList<BallType> order = new ArrayList<>();
+        boolean upperFault = false;
+        final Feeder f;
+        long now = 0;
+
+        FeederRig() {
+            BallSensor upperS = new BallSensor(out -> {
+                if (upperFault) {                 // I2C caído: el SDK da ceros y 152.4 mm
+                    out[0] = out[1] = out[2] = 0;
+                    out[3] = 152.4;
+                    return false;
+                }
+                boolean flicker = bw.t >= bw.flickerFromS && bw.t < bw.flickerToS;
+                fill(out, flicker ? BallType.NONE : bw.upper, 20);
+                return true;
+            }, SensorCfg.UPPER, 0.04);
+            BallSensor copaS = new BallSensor(out -> {
+                fill(out, bw.copaMm < 10 ? bw.copa : BallType.NONE, bw.copa.isNectar() ? 4.6 : 16.1);
+                return true;
+            }, SensorCfg.COPA, 0.04);
+            BeamSensor filaB = new BeamSensor(Fakes.digital(() -> bw.fila.isBall()), true);
+            f = new Feeder(fila.proxy(), copa.proxy(), elev.proxy(), upperS, copaS, filaB);
+            f.initHardware(now);
+        }
+
+        /** 10 ms. Regresa los tiros contados en este paso. */
+        int step(boolean intakeFeeding, boolean flywheelOn) {
+            now += 10 * MS;
+            f.update(now, intakeFeeding, false, false, bw.dip, flywheelOn);
+            bw.dip = false;
+            int shots = f.consumeShots();
+            physics(bw, fila, copa, elev, 0.01, order);
+            return shots;
+        }
+    }
+
+    static void testFeederUpperFault() {
+        FeederRig r = new FeederRig();
+        r.bw.upper = BallType.POLLEN;
+        r.bw.copa = BallType.NECTAR_RED;
+        r.upperFault = true;
+        for (int i = 0; i < 600; i++) r.step(true, true);
+        check("V3 de arriba sin lectura: la copa no sube (C1)", r.bw.maxCopaMm < 1 && !r.bw.hazard,
+                String.format("copa hasta %.1f mm %s", r.bw.maxCopaMm, r.bw.hazardWhy));
+        check("V3 de arriba sin lectura: cuenta como pelota arriba", r.f.hasUpperBall(), "");
+        r.f.requestShot();
+        int shots = 0;
+        for (int i = 0; i < 300; i++) shots += r.step(true, true);
+        check("V3 de arriba sin lectura: el tiro se confirma con la caída de rpm", shots == 1 && r.bw.launched == 1,
+                shots + " contados, " + r.bw.launched + " salieron");
+        check("V3 de arriba sin lectura: después del tiro tampoco sube la copa", r.bw.maxCopaMm < 1 && !r.bw.hazard,
+                String.format("copa hasta %.1f mm", r.bw.maxCopaMm));
+    }
+
+    static void testFeederFlicker() {
+        FeederRig r = new FeederRig();
+        r.bw.upper = BallType.NECTAR_RED;
+        r.bw.fireNeedS = 0.6;                     // patina: tarda en salir
+        r.bw.flickerFromS = 0.10;                 // y el V3 deja de verla 60 ms
+        r.bw.flickerToS = 0.16;
+        r.f.requestShot();
+        int shots = 0;
+        for (int i = 0; i < 200; i++) shots += r.step(false, true);
+        check("un parpadeo del V3 a medio tiro no cuenta un tiro (C2)", shots == 1 && r.bw.launched == 1,
+                shots + " contados, " + r.bw.launched + " salieron");
+    }
+
+    static void testFeederStuckInHood() {
+        FeederRig r = new FeederRig();
+        r.bw.upper = BallType.NECTAR_RED;
+        r.bw.copa = BallType.POLLEN;
+        r.bw.stickInHood = true;
+        r.f.requestShot();
+        int shots = 0;
+        boolean gapKept = true;
+        for (int i = 0; i < 300; i++) {
+            shots += r.step(true, true);
+            if (r.bw.hood.isBall() && r.f.nextBall() != BallType.NECTAR_RED) gapKept = false;
+        }
+        check("atorada antes del flywheel (sin caída): no se cuenta (C2)", shots == 0 && r.bw.hood.isBall(), shots + " contados");
+        check("atorada: no se rellena mientras no se confirme", r.bw.maxCopaMm < 1 && r.f.isClearPending() && !r.bw.hazard,
+                String.format("copa hasta %.1f mm %s", r.bw.maxCopaMm, r.bw.hazardWhy));
+        check("atorada: el gap se queda en el de la atorada (NECTAR)", gapKept, "");
+        r.bw.stickInHood = false;                 // el artillero la empuja y sale
+        r.f.forceShot();
+        for (int i = 0; i < 100; i++) shots += r.step(true, true);
+        check("atorada: el empujón la saca y se cuenta", shots == 1 && !r.f.isClearPending(),
+                shots + " contados, pendiente " + r.f.isClearPending());
+        for (int i = 0; i < 300; i++) r.step(true, true);
+        check("atorada: después se vuelve a rellenar", r.bw.upper == BallType.POLLEN && !r.bw.hazard,
+                "arriba " + r.bw.upper);
+
+        FeederRig q = new FeederRig();            // o el artillero dice que ya está libre
+        q.bw.upper = BallType.POLLEN;
+        q.bw.copa = BallType.NECTAR_RED;
+        q.bw.stickInHood = true;
+        q.f.requestShot();
+        for (int i = 0; i < 200; i++) q.step(true, true);
+        q.bw.hood = BallType.NONE;                // la sacó a mano
+        q.f.release();
+        for (int i = 0; i < 300; i++) q.step(true, true);
+        check("atorada: con B (libre) se vuelve a rellenar", q.bw.upper == BallType.NECTAR_RED, "arriba " + q.bw.upper);
+    }
+
+    static void testFeederFlywheelOff() {
+        FeederRig r = new FeederRig();
+        r.bw.upper = BallType.POLLEN;
+        r.bw.fireNeedS = 0.5;
+        r.f.requestShot();
+        for (int i = 0; i < 6; i++) r.step(false, true);
+        double before = r.elev.power;
+        r.step(false, false);                     // se apaga el flywheel a medio tiro
+        check("flywheel apagado a medio tiro: el elevador se detiene", before > 0.5 && Math.abs(r.elev.power) < 0.01
+                && r.f.getState() == Feeder.State.IDLE, String.format("antes %.2f, después %.2f", before, r.elev.power));
+    }
+
+    static void testFeederRefillLimit() {
+        FeederRig r = new FeederRig();
+        r.bw.copa = BallType.POLLEN;
+        r.bw.liftBlocked = true;                  // la pelota nunca llega arriba
+        int rises = 0;
+        Feeder.State prev = r.f.getState();
+        for (int i = 0; i < 1500; i++) {
+            r.step(false, true);
+            if (r.f.getState() == Feeder.State.COPA_UP && prev != Feeder.State.COPA_UP) rises++;
+            prev = r.f.getState();
+        }
+        check("rellenar que falla se detiene tras REFILL_MAX_FAILS intentos", rises == FeederCfg.REFILL_MAX_FAILS
+                && r.f.isRefillBlocked(), rises + " subidas");
+
+        FeederRig q = new FeederRig();
+        q.bw.copa = BallType.POLLEN;
+        q.bw.fila = BallType.NECTAR_RED;
+        q.bw.liftLoses = true;                    // sale de la copa y se queda en el tubo
+        rises = 0;
+        prev = q.f.getState();
+        for (int i = 0; i < 1500; i++) {
+            q.step(true, true);
+            if (q.f.getState() == Feeder.State.COPA_UP && prev != Feeder.State.COPA_UP) rises++;
+            prev = q.f.getState();
+        }
+        check("si la copa regresa vacía de un rellenado fallido, se detiene a la primera", rises == 1
+                && q.f.isRefillBlocked() && !q.bw.hazard, rises + " subidas " + q.bw.hazardWhy);
+    }
+
+    static void testFeederFilaJam() {
+        FeederRig r = new FeederRig();
+        r.bw.fila = BallType.POLLEN;
+        r.bw.copaBlocked = true;                  // la copa no la recibe
+        double pushLate = 0;
+        for (int i = 0; i < 2000; i++) {
+            r.step(false, true);
+            if (r.bw.t >= 4 && r.fila.effective() * Math.signum(FeederCfg.FILA_POWER_IN) > 0.5) pushLate += 0.01;
+        }
+        check("fila atorada: se apaga y solo da un empujón por espera (M9)", pushLate / 16 < 0.35,
+                String.format("empuja %.0f %% del tiempo después de los intentos", 100 * pushLate / 16));
+    }
+
+    // =========================================================== intake: más
+    static void testIntakeFullFromPulling() {
+        Rotor rot = new Rotor(0, 0, false);
+        rot.motor.overshoot = 2;                  // el hub se pasa 2 cuentas al llegar
+        BeamSensor magnet = new BeamSensor(Fakes.digital(() -> !rot.magnetReported), false);
+        BeamSensor none1 = new BeamSensor(Fakes.digital(() -> false), true);
+        BeamSensor none2 = new BeamSensor(Fakes.digital(() -> false), true);
+        BallSensor noColor = new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.04);
+        IntakeF2 in = new IntakeF2(rot.motor.proxy(), magnet, none1, none2, noColor, null, Alliance.RED);
+        long now = 0;
+        boolean done = false;
+        for (int i = 0; i < 1000 && !done; i++) {
+            now += 15 * MS;
+            done = in.initStep(now);
+            rot.step(0.015);
+        }
+        for (int i = 0; i < 10; i++) { now += 15 * MS; in.initStep(now); rot.step(0.015); }
+        check("F2 con sobrepaso del hub: listo para empezar (R102)", in.isStartReady(),
+                String.format("error %.2f°", in.parkErrorDeg()));
+        in.setCommand(Intake.Command.IN);
+        for (int i = 0; i < 40; i++) { now += 10 * MS; in.update(now, false); rot.step(0.01); }   // jalando al 100 %
+        double startPos = rot.motor.pos;
+        for (int i = 0; i < 300; i++) { now += 10 * MS; in.update(now, true); rot.step(0.01); }  // llega la 4a
+        double turned = (rot.motor.pos - startPos) / IntakeF2Cfg.TICKS_PER_ROTOR_REV * 360.0;
+        double err = Rotor.wrap(rot.angleDeg() - IntakeF2Cfg.INDEX_OFFSET_DEG - IntakeF2Cfg.FULL_HOLD_DEG);
+        check("modo lleno desde el 100 %: no persigue vueltas (M4)", turned < 360 + 30 && Math.abs(err) <= 2.5,
+                String.format("giró %.0f° y quedó a %.2f° de +25°", turned, err));
+    }
+
+    static void testIntakeRivalCount() {
+        final boolean[] beam = {false};
+        final BallType[] seen = {BallType.NONE};
+        Fakes.Motor m = new Fakes.Motor();
+        IntakeF2 in = new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
+                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> beam[0]), true),
+                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0),
+                null, Alliance.RED);
+        in.setCommand(Intake.Command.IN);
+        long now = 0;
+        for (int i = 0; i < 10; i++) { now += 10 * MS; in.update(now, false); }
+        beam[0] = true;                           // llega a la garganta y se cuenta...
+        for (int i = 0; i < 6; i++) { now += 10 * MS; in.update(now, false); }
+        seen[0] = BallType.NECTAR_BLUE;           // ...y luego el V3 ve que es rival
+        for (int i = 0; i < 20; i++) { now += 10 * MS; in.update(now, false); }
+        beam[0] = false;
+        seen[0] = BallType.NONE;
+        for (int i = 0; i < 60; i++) { now += 10 * MS; in.update(now, false); }
+        int entered = in.consumeEntered(), rejected = in.consumeRejected();
+        check("G408: una rival que ya se sumó se resta (cuenta neta 0)", entered == 1 && rejected == 1,
+                entered + " entraron, " + rejected + " rechazadas");
+
+        beam[0] = true;                           // el V3 la ve antes de los 30 ms del haz
+        seen[0] = BallType.NECTAR_BLUE;
+        for (int i = 0; i < 30; i++) { now += 10 * MS; in.update(now, false); }
+        beam[0] = false;
+        seen[0] = BallType.NONE;
+        for (int i = 0; i < 60; i++) { now += 10 * MS; in.update(now, false); }
+        entered = in.consumeEntered();
+        rejected = in.consumeRejected();
+        check("G408: una rival vista antes de contarse ni se suma ni se resta (M2)", entered == 0 && rejected == 0,
+                entered + " entraron, " + rejected + " rechazadas");
+    }
+
+    static void testIntakeRivalStays() {
+        final BallType[] seen = {BallType.NONE};
+        Fakes.Motor m = new Fakes.Motor();
+        IntakeF2 in = new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
+                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> false), true),
+                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0),
+                null, Alliance.RED);
+        in.setCommand(Intake.Command.IN);
+        long now = 0;
+        for (int i = 0; i < 10; i++) { now += 10 * MS; in.update(now, false); }
+        seen[0] = BallType.NECTAR_BLUE;
+        boolean pulled = false;
+        double holdAt = -1;
+        for (int i = 1; i <= 300; i++) {
+            now += 10 * MS;
+            in.update(now, false);
+            if (m.power > 0) pulled = true;
+            if (in.holdsFila() && holdAt < 0) holdAt = i * 0.01;
+        }
+        check("G408: si la rival se queda, nunca se vuelve a jalar (M3)", !pulled, "");
+        check("G408: tras REJECT_MAX_S se detiene y detiene la fila", Math.abs(holdAt - IntakeF2Cfg.REJECT_MAX_S) <= 0.05
+                && m.power == 0, String.format("se detuvo a %.2f s", holdAt));
+        seen[0] = BallType.NONE;
+        for (int i = 0; i < 30; i++) { now += 10 * MS; in.update(now, false); }
+        check("G408: cuando se va, vuelve a jalar", m.power > 0 && !in.holdsFila(), "");
+    }
+
+    static void testIntakeBounce() {
+        final boolean[] beam = {false};
+        Fakes.Motor m = new Fakes.Motor();
+        IntakeF2 in = new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
+                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> beam[0]), true),
+                new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0),
+                null, Alliance.RED);
+        in.setCommand(Intake.Command.IN);
+        boolean[] pattern = new boolean[60];
+        for (int i = 5; i < 10; i++) pattern[i] = true;     // pelota 1: 50 ms
+        for (int i = 12; i < 17; i++) pattern[i] = true;    // rebota tras 20 ms libre
+        for (int i = 35; i < 40; i++) pattern[i] = true;    // pelota 2, 180 ms después
+        long now = 0;
+        int counted = 0;
+        for (boolean b : pattern) {
+            now += 10 * MS;
+            beam[0] = b;
+            in.update(now, false);
+            counted += in.consumeEntered();
+        }
+        check("garganta: un rebote no cuenta otra pelota (m7)", counted == 2, counted + " cuentas");
     }
 }
