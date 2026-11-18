@@ -29,13 +29,15 @@ Base: FtcRobotController SDK **12.0**, Java. Todo el código propio vive en
 | `feeder/Feeder.java` | Fila, copa y elevador: una pelota por etapa. |
 | `feeder/BallInventory.java` | Cuenta de pelotas para G407 (máximo 4). |
 | `intake/Intake.java` | Interfaz del intake: cambiar de mecanismo no rompe lo demás. |
-| `intake/IntakeF2.java` | El intake F2 actual: estacionado con imán, atascos, modo lleno, G408. |
+| `intake/IntakeLengua.java` | El intake nuevo (18-nov): lengua de bandas con dedos colgantes y un servo que la despliega. Escrito y probado en simulación; faltan los µs del servo (CAD). |
+| `intake/ThroatCounter.java` | La garganta: cuenta para G407 y rivales para G408 (la usa la lengua). |
+| `intake/IntakeF2.java` | El intake F2, que sale: estacionado con imán, atascos, modo lleno, G408. El TeleOp lo sigue usando hasta tener los µs de la lengua. |
 | `sensors/` | Sensores de color REV V3, break-beams y switch magnético. |
 | `opmodes/` | TeleOp rojo y azul, y los OpModes de calibración y prueba. |
 
 ## El camino de la pelota
 
-intake F2 → garganta (cuenta) → **fila** (rodillo, BB3) → **copa** (aro en cremallera, V3
+intake → garganta (cuenta) → **fila** (rodillo, BB3) → **copa** (aro en cremallera, V3
 de z 50) → **etapa de arriba** (Gecko de z 128 y una loca con resorte, V3 de z 126) → flywheel.
 
 - Disparar = prender el elevador hasta que la pelota de arriba se vaya. El tiro **solo se
@@ -125,15 +127,16 @@ usa `tryGet` y sigue sin él.
 | Control Hub | I2C bus 1 | `colorCopa` | REV Color Sensor V3 (z 50) |
 | Control Hub | I2C bus 2 | `colorArriba` | REV Color Sensor V3 (z 126) |
 | Control Hub | I2C bus 3 | `colorGarganta` | REV Color Sensor V3 (entrada de la fila) |
-| Control Hub | Digital 1 | `magF2` | Digital Device (REV-31-1462, activo bajo) |
+| Control Hub | Digital 1 | `magF2` | Digital Device (REV-31-1462, activo bajo). Solo con F2 |
 | Control Hub | Digital 3 | `bbBoca` | Digital Device (BB1) |
 | Control Hub | Digital 5 | `bbGarganta` | Digital Device |
 | Control Hub | Digital 7 | `bbFila` | Digital Device (BB3) |
 | Expansion Hub | Motor 0 + encoder 0 | `flywheel` | goBILDA 5203-2402-0001 (1:1) |
-| Expansion Hub | Motor 1 + encoder 1 | `intakeF2` | goBILDA 5203-2402-0005 (5.2:1) |
+| Expansion Hub | Motor 1 + encoder 1 | `intake` | goBILDA 5203-2402-0005 (5.2:1), M_F |
 | Expansion Hub | Motor 2 | `elevador` | goBILDA 5203-2402-0005 (5.2:1) |
 | Expansion Hub | Servo 0 | `hoodGap` | Servo (2000-0025-0002) |
 | Expansion Hub | Servo 2 | `hoodAngulo` | Servo (2000-0025-0002) |
+| Expansion Hub | Servo 4 | `lengua` | Servo (2000-0025-0002). Solo con la lengua |
 
 - Los 3 V3 tienen la misma dirección I2C (0x52): cada uno en su propio bus.
 - Los servos van en puertos de pares distintos (0-1, 2-3, 4-5): cada par comparte 2 A y
@@ -175,7 +178,9 @@ En la interfaz web del Limelight, pipeline **0**:
    el piso marcado.
 5. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador, ciclo completo
    (A solo dispara con el flywheel en velocidad y el hood en su lugar).
-6. **Tune: Intake F2**: estacionado (meta ±2°, máximo ±5°), sentido, sensores.
+6. **Tune: Intake F2**: estacionado (meta ±2°, máximo ±5°), sentido, sensores. Con la
+   lengua, **Tune: Lengua**: µs de plegada, abajo y arriba sin empujar los topes, sentido
+   de M_F y el tiempo real del viaje (`TRAVEL_S`).
 7. IMU: con el logo del hub hacia arriba y el USB hacia atrás (`ImuCfg`). En el TeleOp,
    girar a la izquierda tiene que subir el yaw.
 8. Medir `CAMERA_HEIGHT_IN`, `CAMERA_PITCH_DEG` y las alturas de las filas de tags.
@@ -188,8 +193,8 @@ En la interfaz web del Limelight, pipeline **0**:
 ## Controles del TeleOp
 
 En INIT el robot se prepara solo (torreta al frente, hood a su casa, copa abajo, F2
-estacionado); "LISTO" solo aparece con F2 dentro de ±5°. El artillero indica con su dpad
-cuántas pelotas van precargadas.
+estacionado o la lengua plegada y suelta); con F2, "LISTO" solo aparece dentro de ±5°. El
+artillero indica con su dpad cuántas pelotas van precargadas.
 
 | Gamepad 1, piloto | |
 |---|---|
@@ -233,8 +238,11 @@ virtual y las clases reales del robot:
 - Alimentador con un modelo de pelotas: 4 tiros, sin subir la copa con pelota arriba, y
   con fallas a propósito: V3 sin lectura, parpadeo del V3, pelota atorada antes del
   flywheel, flywheel apagado a medio tiro, rellenado que falla y fila atorada.
-- Intake F2: estacionado (con sobrepaso del hub), modo lleno desde el 100 %, rechazo de
-  NECTAR rival (contada, sin contar y que se queda), rebotes en la garganta y atascos.
+- Intake F2: estacionado (con sobrepaso del hub) y modo lleno desde el 100 %.
+- Los dos intakes con las mismas pruebas: rechazo de NECTAR rival (contada, sin contar y
+  que se queda), rebotes en la garganta, la 4a pelota sobre el haz y atascos.
+- Lengua: plegada y suelta en INIT, se queda plegada al dar Play con 4 pelotas, baja y
+  solo entonces jala, sube con 4, y con una rival primero baja y luego hace reversa.
 
 Lo que la simulación **no** prueba: fricción, rebotes, el vuelo de la pelota, la luz del
 campo, ni que el robot real tenga las medidas del CAD. Comparte supuestos con el código
@@ -249,7 +257,11 @@ Abrir la carpeta `robot/` en Android Studio y correr `TeamCode` sobre el Control
 
 - Todos los valores MEDIR y CALIBRAR de `Config.java`.
 - Confirmar el reparto de puertos y rehacer la hoja de cableado con él.
-- El intake F2 se va a cambiar: la nueva clase solo tiene que implementar `Intake`.
+- Intake de la lengua: faltan los µs de las tres posiciones (salen del diseño de la
+  palanca y la biela), el tiempo real del viaje y la posición nueva de la C270. Para
+  usarlo: `IntakeChoice.USE_LENGUA = true` y configurar `lengua` (y quitar `magF2`).
+  Cuándo baja la lengua es propuesta del CAD (al dar Play se queda plegada; baja con el
+  intake prendido y menos de 4 pelotas): lo decide Adrián.
 - Autónomo.
 
 ## Otros
