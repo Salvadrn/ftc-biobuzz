@@ -160,6 +160,22 @@ final class FieldSim {
     /** Rumbo verdadero (grados, + izquierda) y distancia horizontal del eje de la torreta a la fila de arriba. */
     static double[] truthFromAxis(double axisX, double axisY, double turretHeadingRad) {
         double[] rc = rowCenter(true);
+        return truthTo(rc[0], rc[1], axisX, axisY, turretHeadingRad);
+    }
+
+    /**
+     * Lo mismo, pero al centro de la abertura de la CELL de arriba: APERTURE_OUT_IN hacia
+     * afuera de la fila (la fila corre en y, así que su normal horizontal es x), del lado
+     * de la cámara. Ahí apunta la visión cuando ve 2 o más tags.
+     */
+    static double[] truthApertureFromAxis(double axisX, double axisY, double turretHeadingRad) {
+        double[] rc = rowCenter(true);
+        double side = Math.signum(axisX - rc[0]);
+        return truthTo(rc[0] + side * VisionCfg.APERTURE_OUT_IN, rc[1], axisX, axisY, turretHeadingRad);
+    }
+
+    private static double[] truthTo(double px, double py, double axisX, double axisY, double turretHeadingRad) {
+        double[] rc = {px, py};
         double dx = rc[0] - axisX, dy = rc[1] - axisY;
         double bearingField = Math.atan2(dy, dx);
         double rel = Math.toDegrees(bearingField - turretHeadingRad);
