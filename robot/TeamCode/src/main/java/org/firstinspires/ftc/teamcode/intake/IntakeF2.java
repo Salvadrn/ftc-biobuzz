@@ -32,15 +32,23 @@ import java.util.Random;
  *    60 a 100 ms (al azar) y vuelve a jalar, hasta 3 veces; luego avisa.
  *  - Con 4 pelotas (G407): modo lleno = va a +25° y frena en BRAKE (no reversa).
  *  - G408: si la cámara ve una NECTAR rival enfrente, no jala y avisa. Si el V3 la ve
- *    adentro, reversa del intake y de la fila de 0.3 a 0.5 s.
+ *    adentro, reversa del intake y de la fila de 0.3 a 0.5 s; si la sigue viendo, hasta
+ *    REJECT_MAX_S, y luego se detiene (con la fila quieta) hasta que el piloto la saque.
+ *
+ * Cuenta (G407): una pelota se suma al llegar a la garganta y una rival se resta solo si
+ * ya se había sumado. Un corte del haz es pelota nueva solo si antes estuvo libre
+ * THROAT_CLEAR_S (una pelota que rebota no cuenta dos veces).
  *
  * A Adrián no le convence F2 y se va a cambiar: esta clase vive detrás de Intake.
  */
 public class IntakeF2 implements Intake {
     private enum State {
         WAITING_PARK, PARK_CLEAR, PARK_FWD, PARK_PASS, PARK_BACK, PARK_GOTO, PARKED, PARK_FAILED,
-        IDLE, PULLING, UNJAM, BLOCKED, REJECTING, EJECTING, FULL_GOTO, FULL_HOLD
+        IDLE, PULLING, UNJAM, BLOCKED, REJECTING, RIVAL_STUCK, EJECTING, FULL_GOTO, FULL_HOLD
     }
+
+    /** R102: con más de esto de error el robot no cabe en el tamaño de inicio. */
+    private static final double START_TOLERANCE_DEG = 5.0;
 
     private enum Drive { NONE, POWER, VELOCITY, TO_POSITION }
 
@@ -58,10 +66,12 @@ public class IntakeF2 implements Intake {
 
     // Índice del rotor (cuentas del encoder en 0°)
     private boolean indexKnown = false;
+    private boolean parkOk = false;
     private double indexTicks;
     private double edgeFwd, clearFromTicks = Double.NaN, searchFromTicks;
     private double inactiveFromTicks = Double.NaN;   // desde dónde se ve el imán ausente
     private long withinSinceNs = -1;                  // desde cuándo está cerca del objetivo
+    private double fullTargetTicks = Double.NaN;      // +25° del modo lleno, fijo al entrar
 
     // Control del motor sin mandar comandos repetidos
     private Drive drive = Drive.NONE;
@@ -71,12 +81,14 @@ public class IntakeF2 implements Intake {
     private boolean throatWasActive = false;
     private boolean throatCounted = false;
     private long throatSinceNs;
+    private long throatClearSinceNs = Long.MIN_VALUE / 2;
+    private long ejectReleaseNs = -1;     // en reversa soltó el haz: se cuenta si sigue libre
+    private boolean rivalNoCount = false; // hay una NECTAR rival en la garganta: no se suma
     private long mouthSinceNs = -1;
     private int unjamTries = 0;
     private long unjamUntilNs, rejectUntilNs;
     private int entered = 0, rejected = 0;
     private BallType lastType = BallType.NONE;
-    private boolean rivalWasSeen = false;
     private String warning = "";
 
     public IntakeF2(DcMotorEx motor, BeamSensor magnet, BeamSensor mouth, BeamSensor throat,
@@ -171,11 +183,13 @@ public class IntakeF2 implements Intake {
             case PARK_GOTO: {
                 double target = nearest(indexTicks, pos);
                 driveTo(target);
-                if (arrived(pos, target, nowNs) || timeout) {
+                if (arrived(pos, target, nowNs)) {
                     drivePower(0);
+                    parkOk = true;
                     enter(State.PARKED, nowNs);
                     return true;
                 }
+                if (timeout) failPark(nowNs, "no llegó a 0°");
                 return false;
             }
 
@@ -190,6 +204,11 @@ public class IntakeF2 implements Intake {
         drivePower(0);
         warning = "F2 sin estacionar: " + why;
         enter(State.PARK_FAILED, nowNs);
+    }
+
+    @Override
+    public boolean isStartReady() {
+        return parkOk && Math.abs(parkErrorDeg()) <= START_TOLERANCE_DEG;
     }
 
     /** Error de estacionado en grados (para "Tune: Intake F2" y la inspección). */
@@ -221,18 +240,50 @@ public class IntakeF2 implements Intake {
         boolean mouthBall = mouth.isActive();
         boolean throatBall = throat.isActive();
         BallType seen = throatColor.read(nowNs);
+        boolean rivalNow = seen.isRivalFor(alliance);
         boolean pullingIn = state == State.PULLING;
 
         // Conteo con el break-beam de la garganta.
+        //  - Un corte es pelota nueva solo si el haz estuvo libre THROAT_CLEAR_S (rebotes).
         //  - Hacia adentro se cuenta al LLEGAR (haz cortado ≥ THROAT_MIN_S): la 4a pelota se
         //    queda parada sobre el haz y nunca lo libera; contarla al salir la contaría dos
         //    veces cuando después avance a la fila.
-        //  - Hacia afuera (reversa del piloto) se cuenta al LIBERAR: ya salió.
+        //  - Hacia afuera (reversa del piloto) se cuenta al LIBERAR, si se queda libre.
         if (throatBall && !throatWasActive) {
-            throatSinceNs = nowNs;
-            throatCounted = false;
+            if ((nowNs - throatClearSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_CLEAR_S) {
+                throatSinceNs = nowNs;
+                throatCounted = false;
+            }
+            ejectReleaseNs = -1;
         }
-        if (throatBall && !throatCounted && pullingIn
+        if (!throatBall && throatWasActive) {
+            throatClearSinceNs = nowNs;
+            if (state == State.EJECTING && (nowNs - throatSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_MIN_S) {
+                ejectReleaseNs = nowNs;
+            }
+        }
+        if (ejectReleaseNs >= 0 && (nowNs - ejectReleaseNs) / 1e9 >= IntakeF2Cfg.THROAT_CLEAR_S) {
+            ejectReleaseNs = -1;
+            rejected++;
+        }
+        throatWasActive = throatBall;
+
+        // G408 adentro: NECTAR rival en la entrada de la fila. Se resta solo si ya se había
+        // sumado; si no, ya no se suma. Se olvida cuando se va y el haz queda libre.
+        if (rivalNow && !rivalNoCount) {
+            rivalNoCount = true;
+            if (throatBall && throatCounted) rejected++;
+            if (state != State.REJECTING) {
+                rejectUntilNs = nowNs + (long) (IntakeF2Cfg.REJECT_S * 1e9);
+                warning = "NECTAR rival adentro: sacándola";
+                enter(State.REJECTING, nowNs);
+            }
+        } else if (!rivalNow && rivalNoCount && !throatBall
+                && (nowNs - throatClearSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_CLEAR_S) {
+            rivalNoCount = false;
+        }
+
+        if (throatBall && !throatCounted && pullingIn && !rivalNoCount
                 && (nowNs - throatSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_MIN_S) {
             throatCounted = true;
             entered++;
@@ -240,30 +291,36 @@ public class IntakeF2 implements Intake {
             mouthSinceNs = -1;
             if (warning.startsWith("atasco")) warning = "";
         }
-        if (!throatBall && throatWasActive && state == State.EJECTING
-                && (nowNs - throatSinceNs) / 1e9 >= IntakeF2Cfg.THROAT_MIN_S) {
-            rejected++;
-        }
-        throatWasActive = throatBall;
         if (seen.isBall()) lastType = seen;
-
-        // G408 adentro: NECTAR rival en la entrada de la fila (una vez por pelota)
-        boolean rivalNow = seen.isRivalFor(alliance);
-        boolean rivalNew = rivalNow && !rivalWasSeen;
-        rivalWasSeen = rivalNow;
-        if (rivalNew && state != State.REJECTING) {
-            rejected++;
-            rejectUntilNs = nowNs + (long) (IntakeF2Cfg.REJECT_S * 1e9);
-            warning = "NECTAR rival adentro: sacándola";
-            enter(State.REJECTING, nowNs);
-        }
 
         boolean rivalAhead = camera != null && !rivalOverride && camera.rivalAhead();
 
         switch (state) {
             case REJECTING:
-                drivePower(-IntakeF2Cfg.IN_POWER);
-                if (nowNs >= rejectUntilNs) enter(nextFromCommand(robotFull, rivalAhead), nowNs);
+                if (nowNs >= rejectUntilNs && !rivalNow) {
+                    warning = "";
+                    enter(nextFromCommand(robotFull, rivalAhead), nowNs);
+                    runSteady(nowNs, mouthBall);
+                } else if (secondsIn(nowNs) >= IntakeF2Cfg.REJECT_MAX_S) {
+                    drivePower(0);
+                    warning = "NECTAR rival atorada en la entrada: sácala con reversa (bumper izq. 1)";
+                    enter(State.RIVAL_STUCK, nowNs);
+                } else {
+                    drivePower(-IntakeF2Cfg.IN_POWER);
+                }
+                break;
+
+            case RIVAL_STUCK:            // no se jala ni se mueve la fila hasta que se vaya
+                if (command == Command.OUT) {
+                    enter(State.EJECTING, nowNs);
+                    runSteady(nowNs, mouthBall);
+                } else if (!rivalNow) {
+                    warning = "";
+                    enter(nextFromCommand(robotFull, rivalAhead), nowNs);
+                    runSteady(nowNs, mouthBall);
+                } else {
+                    drivePower(0);
+                }
                 break;
 
             case UNJAM:
@@ -276,10 +333,15 @@ public class IntakeF2 implements Intake {
                     enter(nextFromCommand(false, rivalAhead), nowNs);
                     break;
                 }
+                if (secondsIn(nowNs) < IntakeF2Cfg.FULL_BRAKE_S) {   // viene al 100 %: frenar primero
+                    drivePower(0);
+                    break;
+                }
                 double pos = motor.getCurrentPosition();
-                double target = fullTarget(pos);
-                driveTo(target);
-                if (arrived(pos, target, nowNs) || secondsIn(nowNs) > IntakeF2Cfg.FULL_GOTO_TIMEOUT_S) {
+                if (Double.isNaN(fullTargetTicks)) fullTargetTicks = fullTarget(pos);   // una sola vez
+                driveTo(fullTargetTicks);
+                if (arrived(pos, fullTargetTicks, nowNs)
+                        || secondsIn(nowNs) > IntakeF2Cfg.FULL_BRAKE_S + IntakeF2Cfg.FULL_GOTO_TIMEOUT_S) {
                     drivePower(0);
                     enter(State.FULL_HOLD, nowNs);
                 }
@@ -384,11 +446,16 @@ public class IntakeF2 implements Intake {
 
     // ===================== motor =====================
 
+    /*
+     * Al cambiar de modo, el SDK vuelve a mandar la última potencia (LynxDcMotorController,
+     * leído con javap). Por eso se manda 0 antes de cada setMode.
+     */
     private void drivePower(double p) {
         if (drive != Drive.POWER) {
+            motor.setPower(0);
             motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
             drive = Drive.POWER;
-            driveValue = Double.NaN;
+            driveValue = 0;
         }
         if (p != driveValue) {
             motor.setPower(p);
@@ -398,6 +465,7 @@ public class IntakeF2 implements Intake {
 
     private void driveVelocity(double ticksPerS) {
         if (drive != Drive.VELOCITY) {
+            motor.setPower(0);
             motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
             drive = Drive.VELOCITY;
             driveValue = Double.NaN;
@@ -410,11 +478,15 @@ public class IntakeF2 implements Intake {
 
     private void driveTo(double ticks) {
         int t = (int) Math.round(ticks);
-        if (drive != Drive.TO_POSITION || t != (int) driveValue) {
+        if (drive != Drive.TO_POSITION) {
+            motor.setPower(0);
             motor.setTargetPosition(t);           // primero el objetivo, luego el modo
             motor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
             motor.setPower(IntakeF2Cfg.GOTO_POWER);
             drive = Drive.TO_POSITION;
+            driveValue = t;
+        } else if (t != (int) driveValue) {
+            motor.setTargetPosition(t);
             driveValue = t;
         }
     }
@@ -425,6 +497,7 @@ public class IntakeF2 implements Intake {
         state = s;
         stateStartNs = nowNs;
         withinSinceNs = -1;
+        fullTargetTicks = Double.NaN;
     }
 
     private double secondsIn(long nowNs) {
@@ -438,7 +511,12 @@ public class IntakeF2 implements Intake {
 
     @Override
     public boolean wantsFilaReverse() {
-        return state == State.REJECTING;
+        return state == State.REJECTING || (state == State.EJECTING && rivalNoCount);
+    }
+
+    @Override
+    public boolean holdsFila() {
+        return state == State.RIVAL_STUCK;
     }
 
     @Override
@@ -481,13 +559,15 @@ public class IntakeF2 implements Intake {
     @Override
     public void stop() {
         drivePower(0);
-        if (camera != null) camera.close();
+        // La cámara no se cierra aquí: el SDK cierra el VisionPortal solo al terminar el
+        // OpMode, y close() espera sin poder interrumpirse a que la cámara acabe de abrir.
     }
 
     @Override
     public void addTelemetry(Telemetry telemetry) {
         telemetry.addData("Intake F2", "%s  boca %s  garganta %s  color %s",
-                state, mouth.isActive() ? "sí" : "no", throat.isActive() ? "sí" : "no", throatColor.last());
+                state, mouth.isActive() ? "sí" : "no", throat.isActive() ? "sí" : "no",
+                throatColor.isFault() ? "SIN LECTURA" : throatColor.last());
         if (camera != null) telemetry.addData("  cámara", camera.describe());
         if (!warning.isEmpty()) telemetry.addLine("!! " + warning);
     }
