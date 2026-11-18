@@ -27,8 +27,10 @@ import org.firstinspires.ftc.teamcode.util.StateStore;
  *
  * Por eso aquí:
  *  1. Los dos servos se escriben SIEMPRE juntos, en cada ciclo, con la ley.
- *  2. El gap no salta: se mueve en rampa (GAP_RATE_DEG_S, mucho más lento que los servos)
- *     para que los dos sigan la rampa casi igual y δ no se salga de la envolvente.
+ *  2. El gap no salta: primero δ va a TRANSIT_DELTA_DEG, luego el gap se mueve en rampa
+ *     (GAP_RATE_DEG_S, mucho más lento que los servos) y al final δ va a lo pedido. Si un
+ *     servo se atrasa, el error se va hacia el flywheel, no hacia la Limelight (CAD v104:
+ *     δ no tiene topes físicos; la Limelight está a -18.3° en NECTAR).
  *  3. Cada servo tiene setPwmRange: aunque haya un error, no puede salir de su recorrido.
  *  4. Al arrancar, los servos reciben primero la posición en la que quedaron la última
  *     vez (se guarda en el Control Hub). Así no hay un salto a ciegas.
@@ -131,8 +133,13 @@ public class Hood {
         lastUpdateNs = nowNs;
 
         double oldGap = gapCmdDeg, oldDelta = deltaCmdDeg;
-        gapCmdDeg = approach(gapCmdDeg, gapTargetDeg, HoodCfg.GAP_RATE_DEG_S * dt);
-        deltaCmdDeg = approach(deltaCmdDeg, deltaTargetDeg, HoodCfg.DELTA_RATE_DEG_S * dt);
+        // Cambio de gap en tres tiempos: δ al de tránsito, el gap en rampa, δ a lo pedido.
+        boolean gapMoving = gapCmdDeg != gapTargetDeg;
+        double deltaGoal = gapMoving ? HoodCfg.TRANSIT_DELTA_DEG : deltaTargetDeg;
+        deltaCmdDeg = approach(deltaCmdDeg, deltaGoal, HoodCfg.DELTA_RATE_DEG_S * dt);
+        if (gapMoving && deltaCmdDeg == HoodCfg.TRANSIT_DELTA_DEG) {
+            gapCmdDeg = approach(gapCmdDeg, gapTargetDeg, HoodCfg.GAP_RATE_DEG_S * dt);
+        }
         if (gapCmdDeg != oldGap || deltaCmdDeg != oldDelta) {
             settleUntilNs = nowNs + (long) (HoodCfg.SETTLE_S * 1e9);
         }
