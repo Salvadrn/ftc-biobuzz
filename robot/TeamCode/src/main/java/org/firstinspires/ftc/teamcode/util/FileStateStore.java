@@ -13,10 +13,14 @@ import java.util.Properties;
 /**
  * StateStore en un archivo de texto del Control Hub (FIRST/biobuzz_estado.properties).
  * Si el archivo no existe o falla, regresa el valor por omisión: nunca truena el OpMode.
+ *
+ * Se escribe en un archivo temporal y luego se renombra: si se va la luz a la mitad, queda
+ * el archivo viejo completo y no uno a medias.
  */
 public class FileStateStore implements StateStore {
     private final File file;
     private final Properties props = new Properties();
+    private final boolean existed;
 
     public FileStateStore() {
         this(new File(AppUtil.FIRST_FOLDER, "biobuzz_estado.properties"));
@@ -24,11 +28,19 @@ public class FileStateStore implements StateStore {
 
     public FileStateStore(File file) {
         this.file = file;
+        boolean ok = false;
         try (InputStream in = new FileInputStream(file)) {
             props.load(in);
+            ok = true;
         } catch (IOException ignored) {
             // primera vez o archivo dañado: se empieza vacío
         }
+        existed = ok;
+    }
+
+    /** false = no había archivo: el estado guardado es el de casa (la primera vez, hood a mano en POLLEN). */
+    public boolean existed() {
+        return existed;
     }
 
     @Override
@@ -45,10 +57,14 @@ public class FileStateStore implements StateStore {
     @Override
     public void putDouble(String key, double value) {
         props.setProperty(key, Double.toString(value));
-        try (OutputStream out = new FileOutputStream(file)) {
+        File tmp = new File(file.getPath() + ".tmp");
+        try (OutputStream out = new FileOutputStream(tmp)) {
             props.store(out, "BIOBUZZ: estado que sobrevive entre OpModes");
-        } catch (IOException ignored) {
-            // sin archivo, la próxima vez se supone la posición de casa
+        } catch (IOException e) {
+            return;   // sin archivo, la próxima vez se supone la posición de casa
+        }
+        if (!tmp.renameTo(file)) {
+            tmp.delete();
         }
     }
 }
