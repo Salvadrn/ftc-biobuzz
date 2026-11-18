@@ -8,17 +8,23 @@ import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.Servo;
 
 import org.firstinspires.ftc.teamcode.Config.FeederCfg;
+import org.firstinspires.ftc.teamcode.Config.HoodCfg;
 import org.firstinspires.ftc.teamcode.Config.Names;
 import org.firstinspires.ftc.teamcode.Config.SensorCfg;
+import org.firstinspires.ftc.teamcode.Config.ShotCfg;
 import org.firstinspires.ftc.teamcode.feeder.Feeder;
 import org.firstinspires.ftc.teamcode.sensors.BallSensor;
 import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
 import org.firstinspires.ftc.teamcode.sensors.RevColorReader;
 import org.firstinspires.ftc.teamcode.subsystems.Flywheel;
+import org.firstinspires.ftc.teamcode.subsystems.Hood;
+import org.firstinspires.ftc.teamcode.util.FileStateStore;
 
 /**
  * Prueba la fila, la copa y el elevador con pelotas metidas a mano.
- * Necesita fila, copa, elevador, flywheel, colorArriba, colorCopa y bbFila.
+ * Necesita fila, copa, elevador, flywheel, hoodGap, hoodAngulo, colorArriba, colorCopa y
+ * bbFila. El hood se controla aquí también: su gap sigue a la pelota que va a salir (una
+ * NECTAR por el gap de POLLEN se atora).
  *
  * MODO MANUAL (arranca así), para confirmar sentidos:
  *   gatillo derecho   fila hacia adentro (FILA_POWER_IN). Si saca la pelota, cambia el signo.
@@ -28,7 +34,8 @@ import org.firstinspires.ftc.teamcode.subsystems.Flywheel;
  *
  * MODO CICLO (botón Y): corre la máquina de estados del robot.
  *   bumper derecho    flywheel sí/no (a ShotCfg.IDLE_RPM)
- *   A                 un tiro
+ *   A                 un tiro: solo con el flywheel en velocidad y el hood en su lugar
+ *   B                 "el camino está libre" (quita los bloqueos del alimentador)
  *   La copa y el elevador rellenan solos; la fila carga la copa.
  */
 @TeleOp(name = "Tune: Alimentador", group = "2 Calibracion")
@@ -45,6 +52,8 @@ public class TuneFeeder extends LinearOpMode {
         BeamSensor filaBeam = new BeamSensor(hardwareMap, Names.BEAM_FILA, SensorCfg.BEAM_ACTIVE_HIGH);
         Feeder feeder = new Feeder(fila, copa, elevator, upper, inCopa, filaBeam);
         Flywheel flywheel = new Flywheel(hardwareMap);
+        Hood hood = new Hood(hardwareMap, new FileStateStore());
+        hood.start(System.nanoTime());
 
         waitForStart();
         long start = System.nanoTime();
@@ -61,12 +70,21 @@ public class TuneFeeder extends LinearOpMode {
                 lastFilaPower = Double.NaN;
             }
 
+            hood.setGapFor(feeder.nextBall());
+            hood.setDelta(HoodCfg.DELTA_HOME_DEG);
+            hood.update(now);
+
             if (cycleMode) {
                 if (gamepad1.rightBumperWasPressed()) flywheel.setEnabled(!flywheel.isEnabled());
-                flywheel.setTargetRpm(org.firstinspires.ftc.teamcode.Config.ShotCfg.IDLE_RPM);
-                flywheel.update();
-                if (gamepad1.aWasPressed()) feeder.requestShot();
-                feeder.update(now, false, false, flywheel.consumeShotDip());
+                flywheel.setTargetRpm(ShotCfg.IDLE_RPM);
+                flywheel.update(now);
+                boolean canFire = flywheel.isEnabled() && flywheel.isAtSpeed() && hood.isReady(now);
+                if (gamepad1.aWasPressed()) {
+                    if (canFire) feeder.requestShot();
+                    else telemetry.addLine("!! A: primero flywheel en velocidad y hood en su lugar");
+                }
+                if (gamepad1.bWasPressed()) feeder.release();
+                feeder.update(now, false, false, false, flywheel.consumeShotDip(), flywheel.isEnabled());
             } else {
                 feeder.initUpdate(now);
                 double filaPower = 0;
@@ -95,6 +113,7 @@ public class TuneFeeder extends LinearOpMode {
 
             telemetry.addData("Modo", cycleMode ? "CICLO (Y = manual)" : "MANUAL (Y = ciclo)");
             feeder.addTelemetry(telemetry);
+            hood.addTelemetry(telemetry);
             telemetry.addData("V3 arriba", upper.describe());
             telemetry.addData("V3 copa", inCopa.describe());
             telemetry.addData("BB3 fila", filaBeam.isActive() ? "cortado (hay pelota)" : "libre");
