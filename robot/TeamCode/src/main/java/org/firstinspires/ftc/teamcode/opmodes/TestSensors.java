@@ -30,6 +30,10 @@ import org.firstinspires.ftc.teamcode.vision.RivalNectarDetector;
  *  - Corta cada break-beam con la mano: tiene que decir "cortado". Si dice lo contrario,
  *    cambia BEAM_ACTIVE_HIGH.
  *  - Acerca el imán al REV-31-1462: tiene que decir "presente".
+ *  - Con el tubo vacío, cada V3 tiene que dar color distinto de 0. "SIN LECTURA" es cable
+ *    o I2C. "SATURADO" = bajar SensorCfg.COLOR_GAIN.
+ *  - La C270 usa los rangos genéricos del SDK: revisa que vea una NECTAR azul a ~60 cm y
+ *    que no vea las cintas del piso (para la vista en vivo, IntakeCameraCfg.LIVE_VIEW).
  */
 @TeleOp(name = "Test: Sensores", group = "2 Calibracion")
 public class TestSensors extends LinearOpMode {
@@ -47,6 +51,8 @@ public class TestSensors extends LinearOpMode {
         RivalNectarDetector camera = new RivalNectarDetector(hardwareMap, Alliance.RED);
 
         waitForStart();
+        LLStatus st = null;
+        long lastStatusNs = 0;
         while (opModeIsActive()) {
             long now = System.nanoTime();
             line("V3 arriba (z 126)", upper, now);
@@ -60,7 +66,10 @@ public class TestSensors extends LinearOpMode {
             if (limelight == null) {
                 telemetry.addData("Limelight", "no configurado");
             } else {
-                LLStatus st = limelight.getStatus();
+                if (st == null || now - lastStatusNs > 1_000_000_000L) {   // GET HTTP que bloquea: 1 por segundo
+                    st = limelight.getStatus();
+                    lastStatusNs = now;
+                }
                 LLResult r = limelight.getLatestResult();
                 telemetry.addData("Limelight", "%s  pipeline %d  %.0f fps  %.0f °C",
                         limelight.isConnected() ? "conectado" : "DESCONECTADO",
@@ -79,7 +88,7 @@ public class TestSensors extends LinearOpMode {
             telemetry.update();
         }
         if (limelight != null) limelight.stop();
-        camera.close();
+        // La C270 no se cierra aquí: el SDK cierra el VisionPortal al terminar el OpMode.
     }
 
     private BallSensor color(String name, ColorClassifier.Thresholds t) {
