@@ -40,10 +40,11 @@ public final class Config {
         public static final String MAGNET_F2 = "magF2";               // REV-31-1462
         // Expansion Hub
         public static final String FLYWHEEL = "flywheel";
-        public static final String INTAKE_MOTOR = "intakeF2";         // M_F
+        public static final String INTAKE_MOTOR = "intake";           // M_F (mueve F2 o la lengua)
         public static final String ELEVATOR = "elevador";
         public static final String HOOD_GAP_SERVO = "hoodGap";
         public static final String HOOD_ANGLE_SERVO = "hoodAngulo";
+        public static final String TONGUE_SERVO = "lengua";           // 2000-0025-0002, intake de la lengua
     }
 
     public static final class TurretCfg {
@@ -411,6 +412,64 @@ public final class Config {
 
         /** Antes de ir a +25° en modo lleno, frena este tiempo (viene girando al 100 %). */
         public static double FULL_BRAKE_S = 0.15;
+    }
+
+    /**
+     * Qué intake usa el robot. El 18-nov Adrián cambió F2 por la lengua de bandas con dedos
+     * colgantes. Se queda F2 hasta que el CAD dé los ángulos del servo de la lengua; al
+     * cambiar, también cambia la configuración de la Driver Station (README).
+     */
+    public static final class IntakeChoice {
+        public static boolean USE_LENGUA = false;
+    }
+
+    /** Garganta (break-beam que cuenta y V3 que dice el tipo), para el intake de la lengua. */
+    public static final class ThroatCfg {
+        /** Una pelota tiene que cortar el haz al menos esto para contarse. */
+        public static double MIN_S = 0.03;
+        /** Y el haz tiene que quedar libre al menos esto antes de contar la siguiente (rebotes). */
+        public static double CLEAR_S = 0.06;
+    }
+
+    /**
+     * Intake de la lengua de bandas con dedos colgantes (CAD, 18-nov; el diseño final todavía
+     * está en plan). M_F mueve las bandas y los 4 dedos con la misma cadena que tenía F2; un
+     * servo 2000-0025-0002 despliega la lengua. No hay estacionado ni sensor magnético.
+     */
+    public static final class IntakeLenguaCfg {
+        /** CAD: + = jalar (las bandas no invierten el giro, igual que F2). CONFIRMAR en el robot. */
+        public static boolean REVERSED = false;
+        /** CAD: al 100 % las bandas van a ~1.5 m/s sin carga. */
+        public static double IN_POWER = 1.0;
+
+        /**
+         * PENDIENTE del CAD (sale del diseño de la palanca y la biela). Mientras, las tres
+         * posiciones valen lo mismo y el servo no se mueve. 0.15°/µs; 1500 µs = centro.
+         *  - Plegada: recargada por su peso en el tope de atrás; PWM apagado.
+         *  - Abajo: en el tope duro de abajo; PWM prendido (por ahora, CAD).
+         *  - Arriba (G407, 4 pelotas): PWM prendido, la gravedad la baja.
+         */
+        public static double FOLDED_US = 1500;
+        public static double DOWN_US = 1500;
+        public static double UP_US = 1500;
+        /**
+         * El servo no dice dónde está: "ya llegó" = este tiempo después de mandarla. CAD: 0.25 s
+         * por 60° sin carga y la carga es chica; ~0.6 s un viaje completo. CONFIRMAR con el ángulo.
+         */
+        public static double TRAVEL_S = 0.6;
+
+        /** Atasco, igual que F2 (CAD): BB1 más de esto sin que la garganta cuente. */
+        public static double UNJAM_MOUTH_S = 0.25;
+        public static int UNJAM_MAX_TRIES = 3;
+        public static double UNJAM_MIN_MS = 60;
+        public static double UNJAM_MAX_MS = 100;
+
+        /**
+         * G408: reversa de M_F y de la fila con la lengua ABAJO (arriba, los dedos no tocan la
+         * pelota). CAD: de la garganta a pasar F son ~0.1-0.2 s; se empieza con los de F2.
+         */
+        public static double REJECT_S = 0.4;
+        public static double REJECT_MAX_S = 1.5;
     }
 
     public static final class IntakeCameraCfg {
