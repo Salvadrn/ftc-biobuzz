@@ -12,7 +12,8 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
 /**
  * TeleOp de competencia. La alianza decide qué tags se siguen y qué NECTAR se rechaza.
  *
- * INIT (R103.B): torreta al frente, hood a su casa, copa abajo, F2 estacionado en 0°.
+ * INIT (R103.B): torreta al frente, hood a su casa, copa abajo e intake listo (F2
+ *   estacionado en 0°, o la lengua plegada y suelta).
  *   Gamepad 2 dpad arriba/abajo: cuántas pelotas van precargadas (para la cuenta de G407).
  *
  * GAMEPAD 1 (piloto)
