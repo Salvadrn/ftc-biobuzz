@@ -8,12 +8,14 @@ import org.firstinspires.ftc.teamcode.Config.FeederCfg;
 import org.firstinspires.ftc.teamcode.Config.FlywheelCfg;
 import org.firstinspires.ftc.teamcode.Config.HoodCfg;
 import org.firstinspires.ftc.teamcode.Config.IntakeF2Cfg;
+import org.firstinspires.ftc.teamcode.Config.IntakeLenguaCfg;
 import org.firstinspires.ftc.teamcode.Config.SensorCfg;
 import org.firstinspires.ftc.teamcode.Config.TurretCfg;
 import org.firstinspires.ftc.teamcode.Config.VisionCfg;
 import org.firstinspires.ftc.teamcode.feeder.Feeder;
 import org.firstinspires.ftc.teamcode.intake.Intake;
 import org.firstinspires.ftc.teamcode.intake.IntakeF2;
+import org.firstinspires.ftc.teamcode.intake.IntakeLengua;
 import org.firstinspires.ftc.teamcode.sensors.BallSensor;
 import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
 import org.firstinspires.ftc.teamcode.subsystems.Flywheel;
@@ -86,10 +88,16 @@ public class Sim {
         System.out.println("== intake F2");
         testIntakeParking();
         testIntakeFullFromPulling();
-        testIntakeRejectAndUnjam();
-        testIntakeRivalCount();
-        testIntakeRivalStays();
-        testIntakeBounce();
+        System.out.println("== los dos intakes (F2 y lengua): garganta, G408 y atascos");
+        for (Kind k : new Kind[]{KIND_F2, KIND_LENGUA}) {
+            testIntakeRejectAndUnjam(k);
+            testIntakeRivalCount(k);
+            testIntakeRivalStays(k);
+            testIntakeBounce(k);
+        }
+        System.out.println("== intake de la lengua");
+        testLenguaTongue();
+        testLenguaRejectFromUp();
 
         System.out.println(fails == 0 ? "\nTODO OK" : "\nFALLAS: " + fails);
         System.exit(fails == 0 ? 0 : 1);
@@ -756,70 +764,6 @@ public class Sim {
         check("error de estacionado (meta ±2°, máximo ±5° por R102)", worst <= 2.0, String.format("peor %.2f°", worst));
         check("modo lleno: F2 en +25°", worstFull <= 2.5, String.format("peor %.2f°", worstFull));
     }
-
-    static void testIntakeRejectAndUnjam() {
-        // NECTAR rival en la garganta
-        final BallType[] seen = {BallType.NONE};
-        final boolean[] mouthOn = {false};
-        Fakes.Motor m = new Fakes.Motor();
-        BeamSensor magnet = new BeamSensor(Fakes.digital(() -> true), false);
-        BeamSensor mouth = new BeamSensor(Fakes.digital(() -> mouthOn[0]), true);
-        BeamSensor throat = new BeamSensor(Fakes.digital(() -> false), true);
-        BallSensor color = new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0);
-        IntakeF2 in = new IntakeF2(m.proxy(), magnet, mouth, throat, color, null, Alliance.RED);
-        in.setCommand(Intake.Command.IN);
-        long now = 0;
-        for (int i = 0; i < 10; i++) { now += 10 * MS; in.update(now, false); }
-        seen[0] = BallType.NECTAR_BLUE;
-        boolean filaReverse = false;
-        double reverseS = 0;
-        for (int i = 0; i < 100; i++) {
-            now += 10 * MS;
-            in.update(now, false);
-            if (in.wantsFilaReverse()) { filaReverse = true; reverseS += 0.01; }
-        }
-        check("G408: NECTAR rival adentro -> reversa del intake y de la fila", filaReverse,
-                String.format("%.2f s de reversa", reverseS));
-        check("G408: una rival que nunca se sumó no se resta", in.consumeRejected() == 0 && in.consumeEntered() == 0, "");
-
-        // Atasco en la boca: pelota en BB1 sin que la garganta cuente
-        seen[0] = BallType.NONE;
-        for (int i = 0; i < 50; i++) { now += 10 * MS; in.update(now, false); }
-        mouthOn[0] = true;
-        int pulses = 0;
-        boolean wasReverse = false;
-        for (int i = 0; i < 300; i++) {
-            now += 10 * MS;
-            in.update(now, false);
-            boolean rev = m.power < 0;
-            if (rev && !wasReverse) pulses++;
-            wasReverse = rev;
-        }
-        check("atasco: 3 pulsos de reversa y luego aviso", pulses == 3 && in.warning().startsWith("atasco"),
-                pulses + " pulsos, aviso '" + in.warning() + "'");
-
-        // Conteo en la garganta: la 4a pelota se queda parada sobre el haz
-        final boolean[] beam = {false};
-        Fakes.Motor m2 = new Fakes.Motor();
-        IntakeF2 in2 = new IntakeF2(m2.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
-                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> beam[0]), true),
-                new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0),
-                null, Alliance.RED);
-        in2.setCommand(Intake.Command.IN);
-        int counted = 0;
-        long n2 = 0;
-        boolean[] pattern = new boolean[300];
-        for (int i = 20; i < 40; i++) pattern[i] = true;      // pelota 1 pasa
-        for (int i = 80; i < 200; i++) pattern[i] = true;     // pelota 2 se queda parada (4a) y luego avanza
-        for (int i = 240; i < 260; i++) pattern[i] = true;    // pelota 3 pasa
-        for (boolean b : pattern) {
-            n2 += 10 * MS;
-            beam[0] = b;
-            in2.update(n2, false);
-            counted += in2.consumeEntered();
-        }
-        check("garganta: 3 pelotas = 3 cuentas, aunque una se quede sobre el haz", counted == 3, counted + " cuentas");
-    }
     // =========================================================== flywheel
     static void testFlywheelDip() {
         Fakes.Motor m = new Fakes.Motor();
@@ -1044,18 +988,102 @@ public class Sim {
         check("modo lleno desde el 100 %: no persigue vueltas (M4)", turned < 360 + 30 && Math.abs(err) <= 2.5,
                 String.format("giró %.0f° y quedó a %.2f° de +25°", turned, err));
     }
+    // =========================================================== los dos intakes
+    interface IntakeMaker {
+        Intake make(Fakes.Motor m, BeamSensor mouth, BeamSensor throat, BallSensor color);
+    }
 
-    static void testIntakeRivalCount() {
+    /** Un intake para las pruebas que valen para los dos (misma garganta, mismo G408). */
+    static final class Kind {
+        final String name;
+        final double rejectMaxS;
+        final IntakeMaker mk;
+
+        Kind(String name, double rejectMaxS, IntakeMaker mk) {
+            this.name = name;
+            this.rejectMaxS = rejectMaxS;
+            this.mk = mk;
+        }
+    }
+
+    static final Kind KIND_F2 = new Kind("F2", IntakeF2Cfg.REJECT_MAX_S, (m, mouth, throat, color) ->
+            new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false), mouth, throat, color, null, Alliance.RED));
+    static final Kind KIND_LENGUA = new Kind("lengua", IntakeLenguaCfg.REJECT_MAX_S, (m, mouth, throat, color) ->
+            new IntakeLengua(m.proxy(), new Fakes.PosServo().proxy(), mouth, throat, color, null, Alliance.RED));
+
+    /** Lo deja jalando: F2 sale del estacionado y la lengua baja. Regresa el reloj. */
+    static long warmUp(Intake in, long now) {
+        in.setCommand(Intake.Command.IN);
+        for (int i = 0; i < 80; i++) { now += 10 * MS; in.update(now, false); }
+        in.consumeEntered();
+        in.consumeRejected();
+        return now;
+    }
+
+    static void testIntakeRejectAndUnjam(Kind k) {
+        final BallType[] seen = {BallType.NONE};
+        final boolean[] mouthOn = {false};
+        Fakes.Motor m = new Fakes.Motor();
+        Intake in = k.mk.make(m, new BeamSensor(Fakes.digital(() -> mouthOn[0]), true),
+                new BeamSensor(Fakes.digital(() -> false), true),
+                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0));
+        long now = warmUp(in, 0);
+        seen[0] = BallType.NECTAR_BLUE;           // NECTAR rival en la garganta
+        boolean filaReverse = false;
+        double reverseS = 0;
+        for (int i = 0; i < 100; i++) {
+            now += 10 * MS;
+            in.update(now, false);
+            if (in.wantsFilaReverse()) { filaReverse = true; reverseS += 0.01; }
+        }
+        check(k.name + ": G408 rival adentro -> reversa del intake y de la fila", filaReverse && m.power < 0,
+                String.format("%.2f s de reversa", reverseS));
+        check(k.name + ": G408 una rival que nunca se sumó no se resta",
+                in.consumeRejected() == 0 && in.consumeEntered() == 0, "");
+
+        seen[0] = BallType.NONE;                  // atasco: pelota en BB1 sin que la garganta cuente
+        for (int i = 0; i < 50; i++) { now += 10 * MS; in.update(now, false); }
+        mouthOn[0] = true;
+        int pulses = 0;
+        boolean wasReverse = false;
+        for (int i = 0; i < 300; i++) {
+            now += 10 * MS;
+            in.update(now, false);
+            boolean rev = m.power < 0;
+            if (rev && !wasReverse) pulses++;
+            wasReverse = rev;
+        }
+        check(k.name + ": atasco -> 3 pulsos de reversa y luego aviso", pulses == 3 && in.warning().startsWith("atasco"),
+                pulses + " pulsos, aviso '" + in.warning() + "'");
+
+        final boolean[] beam = {false};           // la 4a pelota se queda parada sobre el haz
+        Fakes.Motor m2 = new Fakes.Motor();
+        Intake in2 = k.mk.make(m2, new BeamSensor(Fakes.digital(() -> false), true),
+                new BeamSensor(Fakes.digital(() -> beam[0]), true),
+                new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0));
+        long n2 = warmUp(in2, 0);
+        int counted = 0;
+        boolean[] pattern = new boolean[300];
+        for (int i = 20; i < 40; i++) pattern[i] = true;      // pelota 1 pasa
+        for (int i = 80; i < 200; i++) pattern[i] = true;     // pelota 2 se queda parada y luego avanza
+        for (int i = 240; i < 260; i++) pattern[i] = true;    // pelota 3 pasa
+        for (boolean b : pattern) {
+            n2 += 10 * MS;
+            beam[0] = b;
+            in2.update(n2, false);
+            counted += in2.consumeEntered();
+        }
+        check(k.name + ": garganta 3 pelotas = 3 cuentas, aunque una se quede sobre el haz", counted == 3, counted + " cuentas");
+    }
+
+    static void testIntakeRivalCount(Kind k) {
         final boolean[] beam = {false};
         final BallType[] seen = {BallType.NONE};
         Fakes.Motor m = new Fakes.Motor();
-        IntakeF2 in = new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
-                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> beam[0]), true),
-                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0),
-                null, Alliance.RED);
-        in.setCommand(Intake.Command.IN);
-        long now = 0;
-        for (int i = 0; i < 10; i++) { now += 10 * MS; in.update(now, false); }
+        Intake in = k.mk.make(m, new BeamSensor(Fakes.digital(() -> false), true),
+                new BeamSensor(Fakes.digital(() -> beam[0]), true),
+                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0));
+        long now = warmUp(in, 0);
         beam[0] = true;                           // llega a la garganta y se cuenta...
         for (int i = 0; i < 6; i++) { now += 10 * MS; in.update(now, false); }
         seen[0] = BallType.NECTAR_BLUE;           // ...y luego el V3 ve que es rival
@@ -1064,7 +1092,7 @@ public class Sim {
         seen[0] = BallType.NONE;
         for (int i = 0; i < 60; i++) { now += 10 * MS; in.update(now, false); }
         int entered = in.consumeEntered(), rejected = in.consumeRejected();
-        check("G408: una rival que ya se sumó se resta (cuenta neta 0)", entered == 1 && rejected == 1,
+        check(k.name + ": G408 una rival que ya se sumó se resta (cuenta neta 0)", entered == 1 && rejected == 1,
                 entered + " entraron, " + rejected + " rechazadas");
 
         beam[0] = true;                           // el V3 la ve antes de los 30 ms del haz
@@ -1075,20 +1103,17 @@ public class Sim {
         for (int i = 0; i < 60; i++) { now += 10 * MS; in.update(now, false); }
         entered = in.consumeEntered();
         rejected = in.consumeRejected();
-        check("G408: una rival vista antes de contarse ni se suma ni se resta (M2)", entered == 0 && rejected == 0,
+        check(k.name + ": G408 una rival vista antes de contarse ni se suma ni se resta", entered == 0 && rejected == 0,
                 entered + " entraron, " + rejected + " rechazadas");
     }
 
-    static void testIntakeRivalStays() {
+    static void testIntakeRivalStays(Kind k) {
         final BallType[] seen = {BallType.NONE};
         Fakes.Motor m = new Fakes.Motor();
-        IntakeF2 in = new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
-                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> false), true),
-                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0),
-                null, Alliance.RED);
-        in.setCommand(Intake.Command.IN);
-        long now = 0;
-        for (int i = 0; i < 10; i++) { now += 10 * MS; in.update(now, false); }
+        Intake in = k.mk.make(m, new BeamSensor(Fakes.digital(() -> false), true),
+                new BeamSensor(Fakes.digital(() -> false), true),
+                new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0));
+        long now = warmUp(in, 0);
         seen[0] = BallType.NECTAR_BLUE;
         boolean pulled = false;
         double holdAt = -1;
@@ -1098,27 +1123,25 @@ public class Sim {
             if (m.power > 0) pulled = true;
             if (in.holdsFila() && holdAt < 0) holdAt = i * 0.01;
         }
-        check("G408: si la rival se queda, nunca se vuelve a jalar (M3)", !pulled, "");
-        check("G408: tras REJECT_MAX_S se detiene y detiene la fila", Math.abs(holdAt - IntakeF2Cfg.REJECT_MAX_S) <= 0.05
+        check(k.name + ": G408 si la rival se queda, nunca se vuelve a jalar", !pulled, "");
+        check(k.name + ": G408 tras REJECT_MAX_S se detiene y detiene la fila", Math.abs(holdAt - k.rejectMaxS) <= 0.05
                 && m.power == 0, String.format("se detuvo a %.2f s", holdAt));
         seen[0] = BallType.NONE;
         for (int i = 0; i < 30; i++) { now += 10 * MS; in.update(now, false); }
-        check("G408: cuando se va, vuelve a jalar", m.power > 0 && !in.holdsFila(), "");
+        check(k.name + ": G408 cuando se va, vuelve a jalar", m.power > 0 && !in.holdsFila(), "");
     }
 
-    static void testIntakeBounce() {
+    static void testIntakeBounce(Kind k) {
         final boolean[] beam = {false};
         Fakes.Motor m = new Fakes.Motor();
-        IntakeF2 in = new IntakeF2(m.proxy(), new BeamSensor(Fakes.digital(() -> true), false),
-                new BeamSensor(Fakes.digital(() -> false), true), new BeamSensor(Fakes.digital(() -> beam[0]), true),
-                new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0),
-                null, Alliance.RED);
-        in.setCommand(Intake.Command.IN);
+        Intake in = k.mk.make(m, new BeamSensor(Fakes.digital(() -> false), true),
+                new BeamSensor(Fakes.digital(() -> beam[0]), true),
+                new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0));
+        long now = warmUp(in, 0);
         boolean[] pattern = new boolean[60];
         for (int i = 5; i < 10; i++) pattern[i] = true;     // pelota 1: 50 ms
         for (int i = 12; i < 17; i++) pattern[i] = true;    // rebota tras 20 ms libre
         for (int i = 35; i < 40; i++) pattern[i] = true;    // pelota 2, 180 ms después
-        long now = 0;
         int counted = 0;
         for (boolean b : pattern) {
             now += 10 * MS;
@@ -1126,6 +1149,111 @@ public class Sim {
             in.update(now, false);
             counted += in.consumeEntered();
         }
-        check("garganta: un rebote no cuenta otra pelota (m7)", counted == 2, counted + " cuentas");
+        check(k.name + ": garganta: un rebote no cuenta otra pelota", counted == 2, counted + " cuentas");
+    }
+
+    // =========================================================== intake de la lengua
+    static boolean near(double a, double b) {
+        return Math.abs(a - b) < 1e-6;
+    }
+
+    /** Posiciones de prueba (las reales las da el CAD): con las de Config el servo no se mueve. */
+    static double[] setTestTonguePositions() {
+        double[] saved = {IntakeLenguaCfg.FOLDED_US, IntakeLenguaCfg.DOWN_US, IntakeLenguaCfg.UP_US};
+        IntakeLenguaCfg.FOLDED_US = 1000;
+        IntakeLenguaCfg.DOWN_US = 2000;
+        IntakeLenguaCfg.UP_US = 1700;
+        return saved;
+    }
+
+    static void restoreTonguePositions(double[] saved) {
+        IntakeLenguaCfg.FOLDED_US = saved[0];
+        IntakeLenguaCfg.DOWN_US = saved[1];
+        IntakeLenguaCfg.UP_US = saved[2];
+    }
+
+    static void testLenguaTongue() {
+        double[] saved = setTestTonguePositions();
+        try {
+            Fakes.Motor m = new Fakes.Motor();
+            Fakes.PosServo sv = new Fakes.PosServo();
+            IntakeLengua in = new IntakeLengua(m.proxy(), sv.proxy(), new BeamSensor(Fakes.digital(() -> false), true),
+                    new BeamSensor(Fakes.digital(() -> false), true),
+                    new BallSensor(out -> { fill(out, BallType.NONE, 0); return true; }, SensorCfg.THROAT, 0.0),
+                    null, Alliance.RED);
+            double travel = IntakeLenguaCfg.TRAVEL_S;
+            long now = 0;
+            double readyAt = -1;
+            for (int i = 1; i <= 100; i++) {
+                now += 10 * MS;
+                if (in.initStep(now) && readyAt < 0) readyAt = i * 0.01;
+            }
+            check("lengua: en INIT va a plegada y luego se suelta (PWM apagado)", in.isStartReady() && !sv.pwmOn
+                    && near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.FOLDED)) && m.power == 0
+                    && Math.abs(readyAt - travel) <= 0.02, String.format("lista a %.2f s (viaje %.2f s)", readyAt, travel));
+
+            in.setCommand(Intake.Command.IN);         // Play con 4 precargadas (G304.G) e intake prendido
+            for (int i = 0; i < 100; i++) { now += 10 * MS; in.update(now, true); }
+            check("lengua: al dar Play con 4 pelotas se queda plegada y suelta",
+                    in.getTongue() == IntakeLengua.Tongue.FOLDED && !sv.pwmOn && m.power == 0, "" + in.getTongue());
+
+            double pullAt = -1;                       // ya hay lugar: baja y luego jala
+            for (int i = 1; i <= 100; i++) {
+                now += 10 * MS;
+                in.update(now, false);
+                if (m.power > 0 && pullAt < 0) pullAt = i * 0.01;
+            }
+            check("lengua: con lugar e intake prendido baja, y M_F jala hasta que llegó",
+                    in.getTongue() == IntakeLengua.Tongue.DOWN && sv.pwmOn
+                            && near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.DOWN))
+                            && Math.abs(pullAt - travel) <= 0.02, String.format("jala a %.2f s", pullAt));
+            check("lengua: jalando, la fila puede traer la siguiente", in.isFeeding(), "");
+
+            for (int i = 0; i < 10; i++) { now += 10 * MS; in.update(now, true); }   // llega la 4a
+            check("lengua: con 4 pelotas sube con PWM y M_F para en BRAKE", in.getTongue() == IntakeLengua.Tongue.UP
+                    && sv.pwmOn && near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.UP)) && m.power == 0
+                    && m.zpb == DcMotor.ZeroPowerBehavior.BRAKE, "");
+
+            in.setCommand(Intake.Command.STOP);       // baja de 4 con el intake apagado
+            for (int i = 0; i < 50; i++) { now += 10 * MS; in.update(now, false); }
+            check("lengua: con lugar pero intake apagado se queda arriba",
+                    in.getTongue() == IntakeLengua.Tongue.UP && m.power == 0, "" + in.getTongue());
+            in.setCommand(Intake.Command.IN);
+            for (int i = 0; i < 100; i++) { now += 10 * MS; in.update(now, false); }
+            check("lengua: al prender el intake regresa abajo y jala",
+                    in.getTongue() == IntakeLengua.Tongue.DOWN && m.power > 0, "" + in.getTongue());
+        } finally {
+            restoreTonguePositions(saved);
+        }
+    }
+
+    static void testLenguaRejectFromUp() {
+        double[] saved = setTestTonguePositions();
+        try {
+            final BallType[] seen = {BallType.NONE};
+            Fakes.Motor m = new Fakes.Motor();
+            Fakes.PosServo sv = new Fakes.PosServo();
+            IntakeLengua in = new IntakeLengua(m.proxy(), sv.proxy(), new BeamSensor(Fakes.digital(() -> false), true),
+                    new BeamSensor(Fakes.digital(() -> false), true),
+                    new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0),
+                    null, Alliance.RED);
+            long now = warmUp(in, 0);                 // abajo y jalando
+            for (int i = 0; i < 80; i++) { now += 10 * MS; in.update(now, true); }   // lleno: arriba
+            seen[0] = BallType.NECTAR_BLUE;           // una rival en la garganta con la lengua arriba
+            boolean badWhileMoving = false;
+            double reverseAt = -1;
+            for (int i = 1; i <= 120; i++) {
+                now += 10 * MS;
+                in.update(now, true);
+                boolean down = in.getTongue() == IntakeLengua.Tongue.DOWN && in.isTongueSettled();
+                if (!down && (m.power != 0 || in.wantsFilaReverse() || !in.holdsFila())) badWhileMoving = true;
+                if (m.power < 0 && in.wantsFilaReverse() && reverseAt < 0) reverseAt = i * 0.01;
+            }
+            check("lengua: rival con la lengua arriba -> primero baja, con M_F y la fila quietos", !badWhileMoving, "");
+            check("lengua: ya abajo, reversa de M_F y de la fila",
+                    Math.abs(reverseAt - IntakeLenguaCfg.TRAVEL_S) <= 0.02, String.format("reversa a %.2f s", reverseAt));
+        } finally {
+            restoreTonguePositions(saved);
+        }
     }
 }
