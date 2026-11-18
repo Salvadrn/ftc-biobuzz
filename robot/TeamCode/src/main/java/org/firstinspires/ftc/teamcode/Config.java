@@ -76,15 +76,25 @@ public final class Config {
         /** Cambios más chicos que esto no se mandan al servo (0.116° de torreta por µs). */
         public static double DEADBAND_DEG = 0.4;
 
-        /** Error máximo para decir que ya apunta. La abertura mide 20 in de ancho. */
+        /** Diferencia entre lo ordenado y lo estimado para decir que la torreta ya llegó. */
         public static double LOCK_TOLERANCE_DEG = 2.5;
+
+        /**
+         * Error de puntería permitido en la abertura, en pulgadas. La ventana útil para una
+         * NECTAR es ~5 in de cada lado de frente y ~2 in a 50° de lado. Se convierte a grados
+         * con la distancia y se recorta a LOCK_TOL_MIN_DEG..LOCK_TOL_MAX_DEG.
+         */
+        public static double LOCK_TOLERANCE_IN = 2.5;
+        public static double LOCK_TOL_MIN_DEG = 1.0;
+        public static double LOCK_TOL_MAX_DEG = 4.0;
 
         /** La foto más vieja que todavía cuenta para decir que apunta. */
         public static double LOCK_FRAME_MAX_AGE_S = 0.3;
 
         /**
          * Para decir "fijo", la foto tiene que haberse tomado al menos esto DESPUÉS de que el
-         * modelo dice que la torreta llegó: cubre un servo real hasta ~35 % más lento.
+         * modelo dice que la torreta llegó. Si el servo real es más lento, en giros grandes
+         * la foto todavía lo ve moviéndose y "fijo" espera a una foto posterior.
          */
         public static double LOCK_PHOTO_MARGIN_S = 0.1;
 
@@ -121,6 +131,39 @@ public final class Config {
 
         /** Corrección fija de puntería, en grados (+ = izquierda). Se ajusta tirando. */
         public static double AIM_TRIM_DEG = 0.0;
+
+        /**
+         * CALC (manual TU09 + librería del SDK): el centro de la abertura está 3.41 in más
+         * afuera que el centro de la fila de tags, perpendicular a la fila. Se apunta ahí.
+         */
+        public static double APERTURE_OUT_IN = 3.41;
+
+        /**
+         * CONFIRMAR en el robot: un tag ARRIBA de la mira debe dar ty positivo. La documentación
+         * del Limelight se contradice. Si "Tune: Tiro" mide las filas por debajo de la cámara o
+         * al revés, poner -1.
+         */
+        public static double TY_SIGN = 1.0;
+
+        /**
+         * Altura medida de la fila contra la mitad entre las dos filas (42.75 in): con esta
+         * diferencia mínima ya se decide arriba o abajo. Se mide con la separación entre tags
+         * (2 o más tags de la misma fila) o con la pose 3D.
+         */
+        public static double UPDOWN_HEIGHT_MARGIN_IN = 3.0;
+
+        /** Fotos seguidas que tienen que contradecir lo que dijo el piloto para cambiarlo. */
+        public static int UPDOWN_OVERRIDE_FRAMES = 10;
+
+        /** Si pasa más que esto sin fotos que decidan, la racha se reinicia. */
+        public static double UPDOWN_STREAK_GAP_S = 0.3;
+
+        /**
+         * Manual TU09, fig. 10-2: al empezar el partido están arriba la CELL roja del lado de la
+         * audiencia y la azul del lado opuesto. El autónomo puede voltearlas.
+         */
+        public static String START_UP_RED = "RED_AUDIENCE";
+        public static String START_UP_BLUE = "BLUE_SCORING";
 
         /**
          * Distancia: false = trigonometría con la altura de la fila (no necesita "Full 3D").
@@ -206,6 +249,12 @@ public final class Config {
         public static double GAP_RATE_DEG_S = 60;
         public static double DELTA_RATE_DEG_S = 60;
 
+        /**
+         * Cambios de δ más chicos que esto no se mandan: cada foto trae una distancia un poco
+         * distinta y, sin esto, el hood nunca terminaría de asentarse.
+         */
+        public static double DELTA_DEADBAND_DEG = 0.3;
+
         /** Tiempo para asentarse después de moverse, y al arrancar. */
         public static double SETTLE_S = 0.15;
         public static double START_SETTLE_S = 0.4;
@@ -280,9 +329,13 @@ public final class Config {
         /** CAD: rampa de ≤ 50 mm/s en los últimos 5 mm de subida. */
         public static double COPA_SLOW_ZONE_MM = 5;
         public static double COPA_SLOW_MM_S = 50;
-        public static double COPA_FAST_MM_S = 200;
-        /** CALC: el servo sin carga a 5 V va a ~236 mm/s. MEDIR con pelota. */
-        public static double COPA_SERVO_MM_S = 200;
+        /** Más lento que el servo real, para que la rampa lenta de arriba sí se cumpla. */
+        public static double COPA_FAST_MM_S = 120;
+        /**
+         * Velocidad que se SUPONE para decir que la copa ya llegó. Pesimista a propósito: CALC
+         * sin carga a 5 V da ~236 mm/s; con pelota y fricción será menos. MEDIR.
+         */
+        public static double COPA_SERVO_MM_S = 100;
         public static double COPA_SETTLE_S = 0.1;
         /** Tiempo abajo antes de soltar el servo (setPwmDisable, el piso carga el peso). */
         public static double COPA_DOWN_RELAX_S = 0.3;
@@ -303,6 +356,12 @@ public final class Config {
         public static double FIRE_AFTER_LOST_S = 0.25;
         public static double FIRE_TIMEOUT_S = 1.0;
         public static double LIFT_TIMEOUT_S = 1.5;
+
+        /** Intentos de rellenar que pueden fallar seguidos antes de esperar al piloto. */
+        public static int REFILL_MAX_FAILS = 2;
+
+        /** Después de "fila atorada" se apaga; vuelve a intentar al cambiar algo o tras esto. */
+        public static double FILA_JAM_COOLDOWN_S = 3.0;
     }
 
     public static final class IntakeF2Cfg {
@@ -333,6 +392,8 @@ public final class Config {
 
         /** Una pelota tiene que cortar el haz de la garganta al menos esto para contarse. */
         public static double THROAT_MIN_S = 0.03;
+        /** Y el haz tiene que quedar libre al menos esto antes de contar la siguiente (rebotes). */
+        public static double THROAT_CLEAR_S = 0.06;
 
         /** Atasco (spec F2 §2.8). */
         public static double UNJAM_MOUTH_S = 0.25;
@@ -342,6 +403,11 @@ public final class Config {
 
         /** G408: reversa de F2 y de la fila al ver una NECTAR rival adentro. */
         public static double REJECT_S = 0.4;
+        /** Si la sigue viendo, la reversa sigue hasta esto; luego se detiene y avisa. */
+        public static double REJECT_MAX_S = 1.5;
+
+        /** Antes de ir a +25° en modo lleno, frena este tiempo (viene girando al 100 %). */
+        public static double FULL_BRAKE_S = 0.15;
     }
 
     public static final class IntakeCameraCfg {
@@ -353,6 +419,8 @@ public final class Config {
         public static double MIN_AREA_PX = 400;
         public static double MAX_AREA_PX = 40000;
         public static double MIN_CIRCULARITY = 0.6;
+        /** Vista en vivo en la Driver Station: útil para calibrar, apagada en competencia. */
+        public static boolean LIVE_VIEW = false;
     }
 
     public static final class SensorCfg {
@@ -361,8 +429,12 @@ public final class Config {
         /** REV-31-1462: activo bajo (imán presente = false). */
         public static boolean MAGNET_ACTIVE_HIGH = false;
 
-        /** Ganancia de los V3 y cada cuánto se lee cada uno (las lecturas I2C son lentas). */
-        public static float COLOR_GAIN = 8f;
+        /**
+         * Ganancia de los V3 (es de software: el SDK multiplica y recorta a 1, así que con
+         * mucha ganancia los canales se saturan y el color sale mal) y cada cuánto se lee
+         * cada uno. El sensor se pone a medir cada 25 ms (de fábrica, cada 100 ms).
+         */
+        public static float COLOR_GAIN = 2f;
         public static double COLOR_MIN_INTERVAL_S = 0.04;
 
         /**
@@ -391,6 +463,6 @@ public final class Config {
         public static RevHubOrientationOnRobot.LogoFacingDirection LOGO =
                 RevHubOrientationOnRobot.LogoFacingDirection.UP;
         public static RevHubOrientationOnRobot.UsbFacingDirection USB =
-                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
+                RevHubOrientationOnRobot.UsbFacingDirection.BACKWARD;   // CAD v104: USB hacia atrás
     }
 }
