@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
+import com.qualcomm.hardware.lynx.LynxServoController;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -72,7 +73,10 @@ public class Hood {
         }
     }
 
-    /** Vuelve a poner los rangos PWM (después de cambiar Config desde "Tune: Hood"). */
+    /**
+     * Vuelve a poner los rangos PWM (después de cambiar Config desde "Tune: Hood"). El SDK no
+     * reenvía el pulso si la posición 0..1 no cambió: se le hace olvidar la última posición.
+     */
     public void reapplyPwmRanges() {
         if (gapServo instanceof PwmControl) {
             ((PwmControl) gapServo).setPwmRange(new PwmControl.PwmRange(gapUsLow(), gapUsHigh()));
@@ -80,7 +84,15 @@ public class Hood {
         if (angleServo instanceof PwmControl) {
             ((PwmControl) angleServo).setPwmRange(new PwmControl.PwmRange(angleUsLow(), angleUsHigh()));
         }
+        forgetLastPosition(gapServo);
+        forgetLastPosition(angleServo);
         write();
+    }
+
+    private static void forgetLastPosition(Servo servo) {
+        if (servo.getController() instanceof LynxServoController) {
+            ((LynxServoController) servo.getController()).forgetLastKnownPosition(servo.getPortNumber());
+        }
     }
 
     // ---------- la ley ----------
@@ -114,9 +126,15 @@ public class Hood {
         gapTargetDeg = ball.needsNectarGap() ? HoodCfg.GAP_NECTAR_DEG : HoodCfg.GAP_POLLEN_DEG;
     }
 
-    /** Inclinación del hood δ. Se recorta al rango de uso (o al de calibración). */
+    /**
+     * Inclinación del hood δ. Se recorta al rango de uso (o al de calibración). Cambios más
+     * chicos que DELTA_DEADBAND_DEG se ignoran: la distancia cambia un poco en cada foto y,
+     * sin esto, el hood nunca terminaría de asentarse.
+     */
     public void setDelta(double deltaDeg) {
-        deltaTargetDeg = Range.clip(deltaDeg, deltaMinDeg, deltaMaxDeg);
+        double d = Range.clip(deltaDeg, deltaMinDeg, deltaMaxDeg);
+        if (Math.abs(d - deltaTargetDeg) < HoodCfg.DELTA_DEADBAND_DEG) return;
+        deltaTargetDeg = d;
     }
 
     /** Solo para "Tune: Hood": permite toda la envolvente segura (δ de -10 a +10). */
