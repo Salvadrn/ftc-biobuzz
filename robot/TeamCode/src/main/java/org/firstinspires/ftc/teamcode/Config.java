@@ -151,7 +151,10 @@ public final class Config {
     }
 
     public static final class HoodCfg {
-        /** CAD: gap del eslabón para cada pelota (POLLEN 63.0 mm de luz, NECTAR 79.7 mm). */
+        /**
+         * CAD: gap del eslabón para cada pelota (POLLEN 63.0 mm de luz, NECTAR 79.7 mm). El gap
+         * sí tiene tope: el perno corre en una ranura que lo para ~0.9° después de 0 y de -34.3.
+         */
         public static double GAP_POLLEN_DEG = 0.0;
         public static double GAP_NECTAR_DEG = -34.3;
 
@@ -170,16 +173,31 @@ public final class Config {
         public static double ANGLE_ZERO_US = 1500;
         public static double ANGLE_US_PER_DEG = 1.0 / 0.15;
 
-        /** CAD: el servo de ángulo, relativo al eslabón, va de -10° a +44.3°. */
+        /** CAD: el servo de ángulo, relativo al eslabón, va de -10° a +44.3° (setPwmRange = último tope). */
         public static double ANGLE_MIN_DEG = -10.0;
         public static double ANGLE_MAX_DEG = 44.3;
 
-        /** CAD: envolvente segura de δ con cualquier gap, y rango de uso. */
+        /**
+         * CAD v104: δ NO tiene topes físicos (los ±10.5° son solo límites de la junta).
+         * La lámina toca la Limelight en δ -30.8° (POLLEN), -24.9° (gap a la mitad) o
+         * -18.3° (NECTAR), y las FlatTop en +35.4°, +40.1° o +44.5°. Envolvente segura y
+         * rango de uso:
+         */
         public static double DELTA_SAFE_MIN_DEG = -10.0;
         public static double DELTA_SAFE_MAX_DEG = 10.0;
         public static double DELTA_USE_MIN_DEG = -10.0;
         public static double DELTA_USE_MAX_DEG = 0.0;
         public static double DELTA_HOME_DEG = 0.0;
+
+        /**
+         * δ mientras el gap cambia. Primero δ va aquí, luego se mueve el gap, luego δ va a lo
+         * pedido. Si un servo se atrasa respecto al otro, el error se va hacia el flywheel:
+         *  - con -5°, el servo de gap se puede adelantar hasta 13° antes de tocar la Limelight
+         *    (NECTAR, -18.3°);
+         *  - si el servo de gap no se mueve (cable suelto), al ir a NECTAR δ queda en
+         *    34.3 - 5 = 29.3°: 6° antes de las FlatTop.
+         */
+        public static double TRANSIT_DELTA_DEG = -5.0;
 
         /**
          * Rampas. Los servos sin carga van a ~240°/s; con 60°/s los dos siguen la rampa casi
