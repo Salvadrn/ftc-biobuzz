@@ -55,7 +55,7 @@ public class Shooter {
                 flywheel.setTargetRpm(ShotCfg.IDLE_RPM);
             }
         }
-        flywheel.update();
+        flywheel.update(nowNs);
         hood.update(nowNs);
     }
 
