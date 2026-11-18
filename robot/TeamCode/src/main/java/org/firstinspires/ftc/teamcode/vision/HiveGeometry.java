@@ -88,37 +88,81 @@ public final class HiveGeometry {
         return heightAboveCamIn * ray.norm() / ray.up;
     }
 
-    /**
-     * Área esperada de un tag (en % de la imagen, como "ta" del Limelight) a cierta distancia.
-     * areaK = 100 · (lado del tag)² · fx² / (ancho · alto de la imagen), en in²; con el
-     * campo de visión del Limelight 3A (54.5° x 42°) y tags de 3.25 in da 1327.5.
-     * cosView es el coseno del ángulo entre la cara del tag y la cámara.
-     */
-    public static double expectedAreaPct(double slantRangeIn, double areaK, double cosView) {
-        return areaK * cosView / (slantRangeIn * slantRangeIn);
+    /** Dónde cruza el rayo el plano horizontal que está heightAboveCamIn más arriba: {adelante, izquierda}. */
+    public static double[] hitAtHeight(Ray ray, double heightAboveCamIn) {
+        if (ray.up <= 1e-9) return null;
+        double k = heightAboveCamIn / ray.up;
+        return new double[]{ray.forward * k, ray.left * k};
     }
 
     /**
-     * Prueba de tamaño: ¿este tag es de la fila de arriba o de la de abajo?
+     * Altura de la fila sobre la cámara, medida con la SEPARACIÓN entre tags.
      *
-     * Para el mismo rayo, si el tag fuera de la fila de arriba estaría más lejos y se vería
-     * más chico; si fuera de la de abajo, más cerca y más grande. La diferencia es de casi
-     * 3 veces en área, así que aguanta errores grandes del modelo.
+     * Los centros de los tags de una fila están a la misma altura y a distancias conocidas
+     * entre sí (Cell.TAG_X_IN). Si se cruza cada rayo con un plano horizontal a altura h, los
+     * puntos quedan separados en proporción a h. La h que da la separación real es la altura
+     * de la fila. No usa el área de los tags (cuya escala en el Limelight es dudosa) ni el
+     * ángulo de vista. Necesita 2 o más tags; regresa NaN si no se puede.
      *
-     * @return puntaje: negativo = parece de arriba, positivo = parece de abajo. Está en
-     *         unidades de "medio salto": -1 = justo lo esperado arriba, +1 = justo abajo.
+     * @param xs  posición de cada tag en la fila (in)
+     * @param rays rayo de cada tag
      */
-    public static double upDownSizeScore(Ray ray, double measuredAreaPct, double camHeightIn,
-                                         double upRowHeightIn, double downRowHeightIn,
-                                         double areaK, double cosView) {
-        double rUp = slantRange(ray, upRowHeightIn - camHeightIn);
-        double rDown = slantRange(ray, downRowHeightIn - camHeightIn);
-        if (Double.isNaN(rUp) || Double.isNaN(rDown) || measuredAreaPct <= 0) return Double.NaN;
-        double lnUp = Math.log(expectedAreaPct(rUp, areaK, cosView));
-        double lnDown = Math.log(expectedAreaPct(rDown, areaK, cosView));
-        double mid = 0.5 * (lnUp + lnDown);
-        double half = 0.5 * (lnDown - lnUp);       // positivo: la fila de abajo se ve más grande
-        return (Math.log(measuredAreaPct) - mid) / half;
+    public static double rowHeightAboveCam(double[] xs, Ray[] rays) {
+        int n = xs.length;
+        if (n < 2) return Double.NaN;
+        double[][] q = new double[n][];
+        for (int i = 0; i < n; i++) {
+            if (rays[i].up <= 1e-9) return Double.NaN;
+            q[i] = new double[]{rays[i].forward / rays[i].up, rays[i].left / rays[i].up};
+        }
+        double num = 0, den = 0;
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                double d = Math.hypot(q[i][0] - q[j][0], q[i][1] - q[j][1]);
+                double sep = Math.abs(xs[i] - xs[j]);
+                num += sep * d;
+                den += d * d;
+            }
+        }
+        return den <= 1e-12 ? Double.NaN : num / den;
+    }
+
+    /**
+     * Ajuste de la fila en el plano horizontal a la altura dada: centro de la fila (x = 0) y
+     * dirección a lo largo de la fila, en el marco horizontal de la cámara.
+     * @return {centroAdelante, centroIzquierda, dirAdelante, dirIzquierda} con dir unitaria
+     */
+    public static double[] rowFit(double[] xs, Ray[] rays, double heightAboveCamIn) {
+        int n = xs.length;
+        if (n < 2) return null;
+        double sx = 0, sxx = 0, sf = 0, sl = 0, sxf = 0, sxl = 0;
+        for (int i = 0; i < n; i++) {
+            double[] p = hitAtHeight(rays[i], heightAboveCamIn);
+            if (p == null) return null;
+            sx += xs[i];
+            sxx += xs[i] * xs[i];
+            sf += p[0];
+            sl += p[1];
+            sxf += xs[i] * p[0];
+            sxl += xs[i] * p[1];
+        }
+        double den = n * sxx - sx * sx;
+        if (Math.abs(den) < 1e-9) return null;
+        double bf = (n * sxf - sx * sf) / den, bl = (n * sxl - sx * sl) / den;
+        double af = (sf - bf * sx) / n, al = (sl - bl * sx) / n;
+        double len = Math.hypot(bf, bl);
+        if (len < 1e-9) return null;
+        return new double[]{af, al, bf / len, bl / len};
+    }
+
+    /** Normal horizontal a la fila que apunta hacia la cámara (hacia el robot). */
+    public static double[] normalTowardCamera(double[] fit) {
+        double nf = -fit[3], nl = fit[2];
+        if (nf * (-fit[0]) + nl * (-fit[1]) < 0) {
+            nf = -nf;
+            nl = -nl;
+        }
+        return new double[]{nf, nl};
     }
 
     /** Altura de un punto dado en el espacio 3D de la cámara del Limelight (x der, y abajo, z al frente). */
