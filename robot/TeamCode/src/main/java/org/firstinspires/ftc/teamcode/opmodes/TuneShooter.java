@@ -7,7 +7,10 @@ import org.firstinspires.ftc.teamcode.Alliance;
 import org.firstinspires.ftc.teamcode.BallType;
 import org.firstinspires.ftc.teamcode.Config.HoodCfg;
 import org.firstinspires.ftc.teamcode.Config.ShotCfg;
+import org.firstinspires.ftc.teamcode.Config.VisionCfg;
 import org.firstinspires.ftc.teamcode.Robot;
+import org.firstinspires.ftc.teamcode.intake.Intake;
+import org.firstinspires.ftc.teamcode.vision.Cell;
 import org.firstinspires.ftc.teamcode.vision.CellTarget;
 
 /**
@@ -21,7 +24,9 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
  *     (del eje de la torreta a la fila de tags). Si no cuadra, revisa CAMERA_HEIGHT_IN,
  *     CAMERA_PITCH_DEG y las alturas de las filas en Config.
  *  2. Revisa que "HIVE arriba" diga la CELL correcta. Si no, X la cambia y anota en qué
- *     distancia se equivocó.
+ *     distancia se equivocó. Las alturas medidas de las filas tienen que salir cerca de
+ *     49.9 in (arriba) y 35.6 in (abajo). Si salen debajo de la cámara (13.4 in) o
+ *     negativas, el signo de ty está al revés: VisionCfg.TY_SIGN = -1.
  *  3. Ajusta rpm y δ hasta que la pelota entre limpia varias veces seguidas. Anota la FILA
  *     en la tabla de esa pelota (el gap lo decide el V3 de arriba, no tú).
  *  4. Cinco o seis distancias por tipo de pelota, de la más cercana a la más lejana.
@@ -31,6 +36,8 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
  *   dpad arriba/abajo = rpm ±50     dpad der/izq = δ ±0.5°
  *   bumper derecho = flywheel sí/no    Y = auto-apuntado sí/no
  *   gatillo derecho = un tiro (cuando todo está listo)    X = cambiar CELL de arriba
+ *   B = "el camino está libre" (quita los bloqueos del alimentador)
+ *   El intake se queda quieto (las pelotas se meten a mano).
  */
 @TeleOp(name = "Tune: Tiro", group = "2 Calibracion")
 public class TuneShooter extends LinearOpMode {
@@ -65,6 +72,7 @@ public class TuneShooter extends LinearOpMode {
 
             while (opModeIsActive()) {
                 long now = System.nanoTime();
+                robot.beginLoop();
                 if (gamepad1.dpadUpWasPressed()) rpm += 50;
                 if (gamepad1.dpadDownWasPressed()) rpm -= 50;
                 if (gamepad1.dpadRightWasPressed()) delta += 0.5;
@@ -72,6 +80,7 @@ public class TuneShooter extends LinearOpMode {
                 if (gamepad1.rightBumperWasPressed()) robot.flywheel.setEnabled(!robot.flywheel.isEnabled());
                 if (gamepad1.yWasPressed()) autoAim = !autoAim;
                 if (gamepad1.xWasPressed()) robot.vision.flipHive();
+                if (gamepad1.bWasPressed()) robot.feeder.release();
                 rpm = Math.max(0, rpm);
                 delta = Math.max(HoodCfg.DELTA_USE_MIN_DEG, Math.min(HoodCfg.DELTA_USE_MAX_DEG, delta));
 
@@ -89,7 +98,12 @@ public class TuneShooter extends LinearOpMode {
                         && (!autoAim || robot.turret.isLocked(now));
                 if (fireDown && !fireWasDown && ready) robot.feeder.requestShot();
                 fireWasDown = fireDown;
-                robot.feeder.update(now, false, false, robot.flywheel.consumeShotDip());
+                robot.feeder.update(now, false, false, false, robot.flywheel.consumeShotDip(),
+                        robot.flywheel.isEnabled());
+
+                // Intake quieto: si dieron Play a medio estacionado, esto apaga M_F
+                robot.intake.setCommand(Intake.Command.STOP);
+                robot.intake.update(now, robot.inventory.isFull());
 
                 CellTarget last = robot.vision.getLastTarget();
                 double age = robot.vision.secondsSinceTarget(now);
@@ -98,7 +112,10 @@ public class TuneShooter extends LinearOpMode {
 
                 telemetry.addData("Distancia (eje de la torreta)", "%.1f in", dist);
                 telemetry.addData("Distancia 3D (cámara)", "%.1f in", robot.vision.get3dDistanceIn());
-                telemetry.addData("Prueba de tamaño", "%+.2f  (- = arriba, + = abajo)", robot.vision.getSizeScore());
+                Cell up = robot.vision.upCell();
+                telemetry.addData("Altura de las filas", "%s %.1f in · %s %.1f in  (esperado %.1f / %.1f)",
+                        up, robot.vision.getRowHeightIn(up), up.partner(), robot.vision.getRowHeightIn(up.partner()),
+                        VisionCfg.TAG_ROW_HEIGHT_UP_IN, VisionCfg.TAG_ROW_HEIGHT_DOWN_IN);
                 telemetry.addLine();
                 if (Double.isNaN(dist)) {
                     telemetry.addData("FILA para " + table, "sin distancia reciente: no anotar");
