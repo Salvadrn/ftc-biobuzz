@@ -137,6 +137,14 @@ public class Hood {
         deltaTargetDeg = d;
     }
 
+    /**
+     * Solo para "Tune: Hood": un gap intermedio (recortado al recorrido del eslabón), para
+     * probar el sentido con un movimiento corto antes de ir hasta NECTAR.
+     */
+    public void setGapDegForTuning(double gapDeg) {
+        gapTargetDeg = clampGap(gapDeg);
+    }
+
     /** Solo para "Tune: Hood": permite toda la envolvente segura (δ de -10 a +10). */
     public void allowFullSafeRange(boolean allow) {
         deltaMinDeg = allow ? HoodCfg.DELTA_SAFE_MIN_DEG : HoodCfg.DELTA_USE_MIN_DEG;
