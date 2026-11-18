@@ -24,7 +24,14 @@ import java.util.List;
  * piso son alargadas y lo que está lejos sale chico.
  *
  * Si la cámara no está en la configuración, simplemente no hace nada: el intake se
- * queda con el sensor de color de la garganta.
+ * queda con el sensor de color de la garganta. Si deja de mandar cuadros (estado distinto
+ * de STREAMING), tampoco: la última lista de manchas se quedaría congelada.
+ *
+ * No se cierra al terminar: el SDK cierra el VisionPortal solo al parar el OpMode, y
+ * close() espera sin poder interrumpirse a que la cámara acabe de abrir.
+ *
+ * Los rangos ColorRange.BLUE/RED del SDK son genéricos (YCrCb), no calibrados para NECTAR:
+ * revisar con "Test: Sensores" y la vista en vivo (IntakeCameraCfg.LIVE_VIEW).
  */
 public class RivalNectarDetector {
     private final VisionPortal portal;
@@ -56,6 +63,7 @@ public class RivalNectarDetector {
                 .setCamera(cam)
                 .setCameraResolution(new Size(IntakeCameraCfg.WIDTH_PX, IntakeCameraCfg.HEIGHT_PX))
                 .addProcessor(blobs)
+                .enableLiveView(IntakeCameraCfg.LIVE_VIEW)
                 .build();
     }
 
@@ -65,7 +73,11 @@ public class RivalNectarDetector {
 
     /** true si hay una NECTAR rival frente al intake en el último cuadro. */
     public boolean rivalAhead() {
-        if (blobs == null) return false;
+        if (blobs == null || portal.getCameraState() != VisionPortal.CameraState.STREAMING) {
+            lastCount = 0;
+            lastArea = 0;
+            return false;
+        }
         List<ColorBlobLocatorProcessor.Blob> found = blobs.getBlobs();
         lastCount = found.size();
         lastArea = found.isEmpty() ? 0 : found.get(0).getContourArea();
@@ -77,6 +89,7 @@ public class RivalNectarDetector {
         return String.format("%s  manchas %d  área %.0f px", portal.getCameraState(), lastCount, lastArea);
     }
 
+    /** Solo si se quiere soltar la cámara a media prueba. No llamarlo al parar. */
     public void close() {
         if (portal != null) portal.close();
     }
