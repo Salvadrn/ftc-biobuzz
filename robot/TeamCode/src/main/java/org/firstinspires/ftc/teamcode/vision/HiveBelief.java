@@ -5,37 +5,53 @@ import org.firstinspires.ftc.teamcode.Alliance;
 /**
  * Cuál de las dos CELLS de nuestra alianza está arriba.
  *
- * El HIVE solo se voltea cuando le meten suficientes pelotas, así que la creencia es
- * "pegajosa": cambia solo cuando varias fotos seguidas dicen lo mismo. El piloto puede
- * forzarla con un botón si la visión se equivoca.
+ *  - Arranca con el estado de inicio del partido (manual TU09, fig. 10-2).
+ *  - El HIVE solo se voltea cuando le meten pelotas, así que la creencia es pegajosa:
+ *    cambia solo con varias fotos SEGUIDAS que lo midan (altura de la fila por separación
+ *    de tags o por pose 3D). Si pasa mucho tiempo sin fotos que decidan, la racha se pierde.
+ *  - Lo que dice el piloto gana, y solo se deshace con UPDOWN_OVERRIDE_FRAMES fotos seguidas
+ *    en contra. Si la visión le da la razón, vuelve a la regla normal.
  *
  * Java puro, sin SDK.
  */
 public class HiveBelief {
     private final Alliance alliance;
-    private final int confirmFrames;
+    private final int confirmFrames, overrideFrames;
+    private final long gapNs;
 
-    private Cell upCell;          // null = todavía no se sabe
+    private Cell upCell;
     private Cell candidate;
     private int streak;
-    private String reason = "sin datos";
+    private int framesNeeded;
+    private long lastEvidenceNs = Long.MIN_VALUE;
+    private String reason;
 
-    public HiveBelief(Alliance alliance, int confirmFrames) {
+    public HiveBelief(Alliance alliance, Cell startUp, int confirmFrames, int overrideFrames, double gapS) {
         this.alliance = alliance;
         this.confirmFrames = Math.max(1, confirmFrames);
+        this.overrideFrames = Math.max(1, overrideFrames);
+        this.gapNs = (long) (gapS * 1e9);
+        this.upCell = startUp;
+        this.framesNeeded = this.confirmFrames;
+        this.reason = "estado de inicio";
     }
 
     /**
-     * Una foto dice que claimedUp es la CELL de arriba (o null si la foto no decide).
+     * Una foto mide que claimedUp es la de arriba. Fotos que no deciden no se reportan.
      * @param why texto corto para la telemetría
      */
-    public void addEvidence(Cell claimedUp, String why) {
-        if (claimedUp == null || claimedUp.alliance != alliance) {
-            return;
+    public void addEvidence(Cell claimedUp, long nowNs, String why) {
+        if (claimedUp == null || claimedUp.alliance != alliance) return;
+        if (nowNs - lastEvidenceNs > gapNs) {
+            candidate = null;
+            streak = 0;
         }
+        lastEvidenceNs = nowNs;
+
         if (claimedUp == upCell) {
             candidate = null;
             streak = 0;
+            framesNeeded = confirmFrames;      // la visión coincide: regla normal
             reason = why;
             return;
         }
@@ -45,10 +61,11 @@ public class HiveBelief {
             candidate = claimedUp;
             streak = 1;
         }
-        if (streak >= confirmFrames) {
+        if (streak >= framesNeeded) {
             upCell = claimedUp;
             candidate = null;
             streak = 0;
+            framesNeeded = confirmFrames;
             reason = why;
         }
     }
@@ -59,13 +76,13 @@ public class HiveBelief {
         upCell = up;
         candidate = null;
         streak = 0;
+        framesNeeded = overrideFrames;
         reason = "piloto";
     }
 
     /** El piloto avisa que el HIVE se volteó: la de arriba pasa a ser la otra. */
     public void flip() {
-        Cell[] both = Cell.ofAlliance(alliance);
-        override(upCell == null ? both[0] : upCell.partner());
+        override(upCell.partner());
     }
 
     public Cell upCell() {
