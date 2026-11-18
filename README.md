@@ -38,23 +38,43 @@ Base: FtcRobotController SDK **12.0**, Java. Todo el código propio vive en
 intake F2 → garganta (cuenta) → **fila** (rodillo, BB3) → **copa** (aro en cremallera, V3
 de z 50) → **etapa de arriba** (Gecko de z 128 y una loca con resorte, V3 de z 126) → flywheel.
 
-- Disparar = prender el elevador hasta que la pelota de arriba se vaya. Se confirma por
-  la caída de rpm del flywheel y, de apoyo, porque el V3 de arriba la deja de ver.
+- Disparar = prender el elevador hasta que la pelota de arriba se vaya. El tiro **solo se
+  cuenta** si el flywheel lo sintió (caída de rpm) y el V3 de arriba ya no la ve.
 - Rellenar = la copa sube la de abajo hasta las Gecko de z 95, el elevador a baja
   potencia la sube hasta que el V3 de arriba la vea, y la copa baja.
 - La copa **nunca** sube si hay pelota esperando arriba: las dos se tocarían.
 - El gap del hood se elige por el color de la pelota que va a salir. Una pelota de color
   desconocido va con el gap de NECTAR: una NECTAR por el gap de POLLEN se atora.
 
+Cuando algo falla, el robot se detiene en vez de adivinar (la telemetría dice qué pasó):
+
+- **V3 sin lectura** (cable o I2C): el SDK no avisa, regresa ceros y 152.4 mm, lo mismo
+  que "no hay nada". El código lo detecta y lo toma como **ocupado**: la copa no sube.
+- **Tiro sin confirmar** (el V3 la dejó de ver y el flywheel no sintió nada): la pelota
+  puede ir atorada en el hood. No se rellena y el gap no se mueve hasta que el artillero
+  la empuje (gatillo izquierdo) o diga que el camino está libre (B).
+- **Rellenar que falla** dos veces seguidas se detiene; si la copa regresa vacía, la
+  pelota se quedó en el tubo y se detiene a la primera. B lo reanuda.
+- **Fila atorada**: después de sus intentos se apaga y da un solo empujón cada 3 s.
+- **Flywheel apagado** a medio tiro: el elevador se detiene.
+- **NECTAR rival** que se queda en la entrada: reversa hasta 1.5 s y luego todo quieto
+  (intake y fila) hasta que el piloto la saque en reversa. Una rival solo se resta de la
+  cuenta si ya se había sumado.
+
 ## Lo que no es obvio
 
 **Las dos CELLS de la alianza se ven al mismo tiempo.** Los tags van en la cara de abajo
 de cada CELL y, con el HIVE inclinado 30°, las dos filas miran al mismo lado. La de arriba
-está a unos 49.9 in del piso y la de abajo a 35.6 in (calculado del manual). Para saber
-cuál es cuál: si se ven las dos, la de arriba se ve más alta; si se ve una, por la altura
-de la pose 3D o por tamaño (a la misma elevación, la de arriba está más lejos y se ve casi
-3 veces más chica). El HIVE solo se voltea cuando le meten pelotas, así que la decisión
-es pegajosa; el artillero la cambia con X si hace falta.
+está a unos 49.9 in del piso y la de abajo a 35.6 in (calculado del manual). La altura de
+cada fila se mide con la **separación entre sus tags** (2 o más tags; los tags miden
+3.25 in y su separación es conocida) o, con un solo tag, con la pose 3D ("Full 3D").
+Arranca creyendo lo del manual (fig. 10-2: arriba la roja del lado de la audiencia y la
+azul del lado contrario). Si el artillero dice con X que se volteó, manda él hasta que 10
+fotos seguidas digan lo contrario.
+
+**Se apunta a la abertura, no a los tags.** El centro de la abertura está 3.41 in más
+afuera que el centro de la fila de tags. Con 2 o más tags se conoce la dirección de la
+fila y se apunta ahí; con uno solo se apunta aproximado y la torreta nunca dice "fija".
 
 **Los tiempos del Limelight.** `getControlHubTimeStampNanos()` del SDK es hora de reloj,
 no la base de `System.nanoTime()`, y el SDK crea un resultado nuevo cada 10 ms aunque la
@@ -74,6 +94,18 @@ posición en la que quedó la última vez (se guarda en el Control Hub).
 **Apagar el PWM de un servo.** En el SDK, `setPwmDisable()` borra la caché del servo y
 el siguiente `setPower` o `setPosition`, aunque sea igual, lo vuelve a prender. La fila
 solo manda comandos cuando cambia de modo; si no, se quedaría en 1500 µs arrastrándose.
+
+**Cambiar el modo de un motor reenvía la última potencia.** Por eso el intake manda 0
+antes de cada `setMode`, y el modo lleno frena primero y calcula su objetivo una sola vez
+(si no, con 1-2 cuentas de sobrepaso del hub, perseguía vueltas enteras).
+
+**Lecturas en bloque en MANUAL.** `Robot` pone los hubs en `MANUAL`: cada ciclo tiene que
+empezar con `robot.beginLoop()` (`initStep` ya lo hace). Sin eso, motores y sensores
+digitales se quedan con la lectura vieja.
+
+**Los V3 miden cada 25 ms** (de fábrica, cada 100 ms; se cambia en cada INIT). Su
+`setGain` es de software y recorta en 1: con mucha ganancia los canales se saturan y el
+color sale mal. "Test: Sensores" marca "SATURADO".
 
 ## Configuración del robot en la Driver Station
 
@@ -118,29 +150,46 @@ En la interfaz web del Limelight, pipeline **0**:
 
 - Fiducial Markers / AprilTag, familia **36h11**, tamaño **82.55 mm** (3.25 in)
 - Sin filtro de IDs: el código filtra por alianza
-- "Full 3D" opcional: si está activo, se usa la altura del tag para decidir arriba o abajo
+- "Full 3D" recomendado: con un solo tag a la vista es lo único que dice si es la fila de
+  arriba o la de abajo
 - Crosshair en el centro: el código usa `tx_nocross` y la corrección va en `AIM_TRIM_DEG`
+- Si de lejos no detecta los tags, subir la resolución (1280x960, a costa de fps)
+- El código **no** cambia de pipeline durante el partido: `pipelineSwitch` es un POST HTTP
+  que puede congelar el ciclo hasta 15 s. Solo avisa si el pipeline no es el 0.
 
 ## Orden de calibración
 
 1. **Test: Sensores**: cada sensor en vivo. Ajustar `SensorCfg` (colores, distancias,
-   sentido de los break-beams).
-2. **Tune: Torreta** (arranca bloqueada a ±35°): `SERVO_CENTER`, `SERVO_INVERTED`, revisar
-   `DEG_PER_SERVO_UNIT` con escuadra. Con el Limelight sin montar o desconectado.
-3. **Tune: Hood**: µs de los dos topes del gap y del ángulo cero. La primera vez, dejar el
-   hood a mano en POLLEN antes de INIT.
-4. **Tune: Copa**: `COPA_DOWN_US` sin empujar el piso y `COPA_UP_US` a 54 mm con vernier.
-5. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador, ciclo completo.
+   sentido de los break-beams). Con el tubo vacío ningún V3 debe decir "SIN LECTURA" ni
+   "SATURADO". La C270 usa rangos de color genéricos del SDK: revisar que vea una NECTAR
+   y no las cintas del piso.
+2. **Tune: Torreta** (arranca bloqueada a ±35°): **antes de engranar** el piñón, dar Play
+   (el servo va a 1500 µs) y engranar con la torreta al frente. Luego `SERVO_CENTER`,
+   `SERVO_INVERTED` y `DEG_PER_SERVO_UNIT` con escuadra. Suelta (bumpers + X) solo llega a
+   ±105° de Config. Con el Limelight sin montar o desconectado.
+3. **Tune: Hood**: ángulo cero, topes del gap. Ir a NECTAR está bloqueado hasta confirmar
+   el signo del ángulo (gatillos, dpad der.) y el sentido del gap con un movimiento de
+   2.5° (dpad izq., botón del stick der.). La primera vez, hood a mano en POLLEN antes de INIT.
+4. **Tune: Copa**: encontrar el piso con la corriente y marcarlo con X (a ±60 µs de
+   `COPA_DOWN_US`); `COPA_UP_US` a 54 mm con vernier. Se limita a 54 mm de cálculo sobre
+   el piso marcado.
+5. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador, ciclo completo
+   (A solo dispara con el flywheel en velocidad y el hood en su lugar).
 6. **Tune: Intake F2**: estacionado (meta ±2°, máximo ±5°), sentido, sensores.
-7. Medir `CAMERA_HEIGHT_IN`, `CAMERA_PITCH_DEG` y las alturas de las filas de tags.
-8. **Tune: Tiro**: llenar `POLLEN_TABLE` y `NECTAR_TABLE` en cinco o seis distancias.
-9. Medir la velocidad real de la torreta (`MAX_SPEED_DEG_S`) y ajustar el PIDF del
+7. IMU: con el logo del hub hacia arriba y el USB hacia atrás (`ImuCfg`). En el TeleOp,
+   girar a la izquierda tiene que subir el yaw.
+8. Medir `CAMERA_HEIGHT_IN`, `CAMERA_PITCH_DEG` y las alturas de las filas de tags.
+9. **Tune: Tiro**: primero revisar que las alturas medidas de las filas den ~49.9 y
+   ~35.6 in. Si salen debajo de la cámara (13.4 in) o negativas, `TY_SIGN = -1`. Luego
+   llenar `POLLEN_TABLE` y `NECTAR_TABLE` en cinco o seis distancias.
+10. Medir la velocidad real de la torreta (`MAX_SPEED_DEG_S`) y ajustar el PIDF del
    flywheel y `SHOT_DIP_RPM`.
 
 ## Controles del TeleOp
 
 En INIT el robot se prepara solo (torreta al frente, hood a su casa, copa abajo, F2
-estacionado). El artillero indica con su dpad cuántas pelotas van precargadas.
+estacionado); "LISTO" solo aparece con F2 dentro de ±5°. El artillero indica con su dpad
+cuántas pelotas van precargadas.
 
 | Gamepad 1, piloto | |
 |---|---|
@@ -153,6 +202,8 @@ estacionado). El artillero indica con su dpad cuántas pelotas van precargadas.
 |---|---|
 | Bumper derecho | Flywheel sí/no |
 | Gatillo derecho (sostener) | Dispara cada vez que todo está listo |
+| Gatillo izquierdo (sostener) | Empuja con el elevador aunque arriba no se vea pelota (sacar una atorada; flywheel en velocidad, sin mira) |
+| B | "El camino está libre": quita los bloqueos del alimentador |
 | A | Auto-apuntado sí/no (arranca en sí) |
 | Y | Torreta al frente (apaga el auto-apuntado) |
 | X | "El HIVE se volteó": cambia cuál CELL está arriba |
@@ -177,8 +228,13 @@ virtual y las clases reales del robot:
 - Torreta de punta a punta: retraso de cámara, servo más lento o más rápido que el modelo,
   chasis girando, vueltas completas y arranque con la torreta girada.
 - Hood con servos de distinta velocidad: δ nunca sale de la envolvente.
-- Alimentador con un modelo de pelotas: 4 tiros, sin subir la copa con pelota arriba.
-- Intake F2: estacionado, modo lleno, rechazo de NECTAR rival y atascos.
+- El piloto contra la visión: su X manda hasta 10 fotos seguidas en contra.
+- Flywheel: bajar la consigna no es tiro; una caída a velocidad sí, una vez.
+- Alimentador con un modelo de pelotas: 4 tiros, sin subir la copa con pelota arriba, y
+  con fallas a propósito: V3 sin lectura, parpadeo del V3, pelota atorada antes del
+  flywheel, flywheel apagado a medio tiro, rellenado que falla y fila atorada.
+- Intake F2: estacionado (con sobrepaso del hub), modo lleno desde el 100 %, rechazo de
+  NECTAR rival (contada, sin contar y que se queda), rebotes en la garganta y atascos.
 
 Lo que la simulación **no** prueba: fricción, rebotes, el vuelo de la pelota, la luz del
 campo, ni que el robot real tenga las medidas del CAD. Comparte supuestos con el código
