@@ -30,11 +30,21 @@ import org.firstinspires.ftc.teamcode.util.FileStateStore;
 import org.firstinspires.ftc.teamcode.vision.CellVision;
 import org.firstinspires.ftc.teamcode.vision.RivalNectarDetector;
 
+import java.util.List;
+
 /**
  * Todo el hardware del robot del CAD v99 en un solo lugar.
  *
  * 7 de 8 motores (4 de tracción, flywheel, M_F del intake y elevador) y 5 de 8 servos
  * (torreta, gap y ángulo del hood, fila y copa), como cuenta R503.
+ *
+ * El constructor ya manda el hood a lo guardado, la torreta al frente y la copa abajo: si
+ * dan Play mientras se construye (la cámara y el Limelight tardan), no se queda nada sin
+ * arrancar. El hood va primero porque desde el INIT estuvo sin PWM.
+ *
+ * Lecturas en bloque en modo MANUAL: llamar beginLoop() al principio de cada ciclo
+ * (initStep() ya lo hace). Sin eso, motores y sensores digitales se quedan con la lectura
+ * vieja.
  */
 public class Robot {
     public final Alliance alliance;
@@ -48,25 +58,31 @@ public class Robot {
     public final CellVision vision;
     public final BallInventory inventory = new BallInventory();
 
+    private final List<LynxModule> hubs;
+    private final FileStateStore hoodStore;
     private final IMU imu;
     private boolean imuInitOk = false;
     private int imuFailedReads = 0;
     private double lastRawYawDeg = 0;
     private double continuousYawDeg = 0;
-    private boolean initStarted = false;
 
     public Robot(HardwareMap hardwareMap, Alliance alliance) {
         this.alliance = alliance;
 
         // Lee todos los sensores de cada hub en un solo viaje por ciclo
-        for (LynxModule hub : hardwareMap.getAll(LynxModule.class)) {
-            hub.setBulkCachingMode(LynxModule.BulkCachingMode.AUTO);
+        hubs = hardwareMap.getAll(LynxModule.class);
+        for (LynxModule hub : hubs) {
+            hub.setBulkCachingMode(LynxModule.BulkCachingMode.MANUAL);
         }
 
-        drive = new MecanumDrive(hardwareMap);
+        hoodStore = new FileStateStore();
+        hood = new Hood(hardwareMap, hoodStore);
+        hood.start(System.nanoTime());
         turret = new Turret(hardwareMap);
+        turret.startCentering(System.nanoTime());
+
+        drive = new MecanumDrive(hardwareMap);
         flywheel = new Flywheel(hardwareMap);
-        hood = new Hood(hardwareMap, new FileStateStore());
         shooter = new Shooter(flywheel, hood);
 
         feeder = new Feeder(
@@ -76,6 +92,7 @@ public class Robot {
                 colorSensor(hardwareMap, Names.COLOR_UPPER, SensorCfg.UPPER),
                 colorSensor(hardwareMap, Names.COLOR_COPA, SensorCfg.COPA),
                 new BeamSensor(hardwareMap, Names.BEAM_FILA, SensorCfg.BEAM_ACTIVE_HIGH));
+        feeder.initHardware(System.nanoTime());
 
         // Para cambiar de intake: otra clase que implemente Intake, aquí.
         intake = new IntakeF2(
@@ -101,22 +118,27 @@ public class Robot {
         return new BallSensor(new RevColorReader(hw, name, SensorCfg.COLOR_GAIN), t, SensorCfg.COLOR_MIN_INTERVAL_S);
     }
 
+    /** Al principio de cada ciclo: la siguiente lectura de cada hub es nueva. */
+    public void beginLoop() {
+        for (LynxModule hub : hubs) hub.clearBulkCache();
+    }
+
     /**
      * Llamar en cada ciclo de INIT (R103.B): torreta al frente, hood a su casa, copa abajo
      * y suelta, F2 estacionado. Regresa true cuando ya quedó en la configuración de inicio.
      */
     public boolean initStep(long nowNs) {
-        if (!initStarted) {
-            initStarted = true;
-            turret.startCentering(nowNs);
-            hood.start(nowNs);
-            feeder.initHardware(nowNs);
-        }
+        beginLoop();
         turret.update(nowNs, updateYaw(), null, false, 0);
         hood.update(nowNs);
         feeder.initUpdate(nowNs);
-        boolean intakeReady = intake.initStep(nowNs);
-        return intakeReady && turret.isPositionKnown() && hood.isReady(nowNs);
+        intake.initStep(nowNs);
+        return intake.isStartReady() && turret.isPositionKnown() && hood.isReady(nowNs);
+    }
+
+    /** false = no había archivo con el estado del hood: se supuso POLLEN y δ de casa. */
+    public boolean hoodStateFound() {
+        return hoodStore.existed();
     }
 
     /**
