@@ -17,28 +17,28 @@ import org.firstinspires.ftc.teamcode.vision.RivalNectarDetector;
 import java.util.Random;
 
 /**
- * Intake de la lengua de bandas con dedos colgantes (CAD, 18-nov; el diseño final todavía
- * está en plan). M_F mueve las bandas y los 4 dedos con la misma cadena que tenía F2; un
- * servo 2000-0025-0002 despliega la lengua. No hay estacionado: ni imán ni encoder.
+ * Intake de la lengua de bandas con dedos colgantes (CAD, 18-nov; todavía no modelada).
+ * M_F mueve las bandas y los 4 dedos; un servo 2000-0025-0002 con manivela y biela
+ * despliega la lengua. No hay estacionado: ni imán ni encoder.
  *
- * La lengua no tiene sensor: "ya llegó" = TRAVEL_S después de mandarla.
+ * La lengua tiene dos posiciones y no tiene sensor: "ya llegó" = TRAVEL_S después de mandarla.
  *  - INIT: a plegada y luego PWM apagado; se sostiene sola contra el tope de atrás (R103) y
  *    el robot queda quieto (G304.H).
+ *  - Solo se pliega con la garganta LIBRE: con una pelota ahí (la 4a), los dedos centrales
+ *    se montan en ella y, al subir, la empujarían contra la flecha del pivote de la fila
+ *    (CAD v106: desde ~12° con NECTAR y ~25° con POLLEN). Sería controlarla y podría romper.
  *  - Al dar Play se queda plegada. Baja cuando el intake está prendido y hay menos de 4
- *    pelotas (G304.G: arranca tocando 4 POLLEN). Propuesta del CAD; Adrián decide.
- *  - Con 4 pelotas (G407) sube a "arriba" (si ya estaba desplegada) con PWM prendido y M_F
- *    para en BRAKE. Al bajar de 4 regresa abajo cuando el intake está prendido.
- *  - Abajo, PWM prendido (por ahora, CAD).
- *  - M_F solo jala con la lengua abajo.
+ *    pelotas. Propuesta del CAD; Adrián decide (y la precarga).
+ *  - Con 4 pelotas (G407) se queda ABAJO y M_F para en BRAKE (CAD v106, por omisión).
+ *  - Abajo, PWM prendido (por ahora, CAD). M_F solo jala con la lengua abajo.
  *
- * Igual que F2: jalar al 100 %, atasco por BB1, cuenta en la garganta (ThroatCounter) y
- * G408 con la cámara y el V3 de la garganta. Para regresar una rival la lengua tiene que
- * estar ABAJO (arriba los dedos no tocan la pelota): primero baja, con la fila quieta, y
- * luego reversa de M_F y de la fila.
+ * Jalar al 100 %, atasco por BB1, cuenta en la garganta (ThroatCounter) y G408 con la
+ * cámara y el V3 de la garganta. Para regresar una rival la lengua tiene que estar ABAJO:
+ * si estaba plegada, primero baja, con la fila quieta, y luego reversa de M_F y de la fila.
  */
 public class IntakeLengua implements Intake {
     /** Posiciones de la lengua. */
-    public enum Tongue { FOLDED, DOWN, UP }
+    public enum Tongue { FOLDED, DOWN }
 
     private enum State { IDLE, PULLING, UNJAM, BLOCKED, REJECTING, RIVAL_STUCK, EJECTING, FULL }
 
@@ -92,12 +92,23 @@ public class IntakeLengua implements Intake {
 
     // ===================== INIT =====================
 
-    /** Lengua a plegada y luego suelta (R103). Regresa true cuando ya quedó así. */
+    /**
+     * Lengua a plegada y luego suelta (R103). Con una pelota en la garganta no se pliega
+     * (y así tampoco cabría en R102): avisa y espera. Regresa true cuando ya quedó plegada.
+     */
     @Override
     public boolean initStep(long nowNs) {
         lastNs = nowNs;
         setMotor(0);
-        if (tongue == null) moveTongue(Tongue.FOLDED, nowNs);
+        throat.update(nowNs, false, false);
+        if (tongue == null) {
+            if (throat.hasBall()) {
+                warning = "pelota en la garganta: sácala para plegar la lengua (R102)";
+            } else {
+                warning = "";
+                moveTongue(Tongue.FOLDED, nowNs);
+            }
+        }
         updateTongue(nowNs);
         initDone = tongue == Tongue.FOLDED && !tonguePwmOn;
         return initDone;
@@ -123,9 +134,9 @@ public class IntakeLengua implements Intake {
     @Override
     public void update(long nowNs, boolean robotFull) {
         lastNs = nowNs;
-        if (tongue == null) moveTongue(Tongue.FOLDED, nowNs);   // dieron Play sin pasar por INIT
-
         throat.update(nowNs, state == State.PULLING, state == State.EJECTING);
+        // Dieron Play sin pasar por INIT: plegarla, si la garganta está libre
+        if (tongue == null && !throat.hasBall()) moveTongue(Tongue.FOLDED, nowNs);
         if (throat.justCounted()) {
             unjamTries = 0;
             mouthSinceNs = -1;
@@ -194,7 +205,6 @@ public class IntakeLengua implements Intake {
     private State next(boolean robotFull, boolean rivalAhead) {
         if (command == Command.OUT) return State.EJECTING;
         if (robotFull) return State.FULL;
-        if (state == State.FULL && command != Command.IN) return State.FULL;   // arriba hasta prender el intake
         if (command == Command.IN) {
             if (rivalAhead) {
                 warning = "NECTAR rival enfrente: no se jala (G408)";
@@ -239,8 +249,7 @@ public class IntakeLengua implements Intake {
                 setMotor(tongueAt(Tongue.DOWN, nowNs) ? -IntakeLenguaCfg.IN_POWER : 0);
                 break;
             case FULL:
-                setMotor(0);                             // BRAKE
-                if (tongue != Tongue.FOLDED) moveTongue(Tongue.UP, nowNs);   // plegada tampoco deja entrar
+                setMotor(0);    // BRAKE; la lengua se queda donde está (abajo: subirla empujaría la 4a)
                 break;
             case BLOCKED:
             case IDLE:
@@ -274,12 +283,7 @@ public class IntakeLengua implements Intake {
     }
 
     public static double usFor(Tongue t) {
-        switch (t) {
-            case DOWN: return IntakeLenguaCfg.DOWN_US;
-            case UP: return IntakeLenguaCfg.UP_US;
-            case FOLDED:
-            default: return IntakeLenguaCfg.FOLDED_US;
-        }
+        return t == Tongue.DOWN ? IntakeLenguaCfg.DOWN_US : IntakeLenguaCfg.FOLDED_US;
     }
 
     public static double positionFor(Tongue t) {
@@ -363,7 +367,7 @@ public class IntakeLengua implements Intake {
                 throat.colorFault() ? "SIN LECTURA" : throat.colorLast());
         if (camera != null) telemetry.addData("  cámara", camera.describe());
         if (IntakeLenguaCfg.FOLDED_US == IntakeLenguaCfg.DOWN_US) {
-            telemetry.addLine("!! Lengua sin calibrar: faltan los µs de plegada, abajo y arriba (CAD)");
+            telemetry.addLine("!! Lengua sin calibrar: faltan los µs de plegada y abajo (CAD)");
         }
         if (!warning.isEmpty()) telemetry.addLine("!! " + warning);
     }
