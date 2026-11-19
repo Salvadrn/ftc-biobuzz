@@ -6,9 +6,10 @@ import org.firstinspires.ftc.teamcode.BallType;
 /**
  * Lo que el resto del robot necesita de un intake, sin importar el mecanismo.
  *
- * El intake F2 del CAD (rotor de aletas de TPU) se va a cambiar. Todo lo demás (TeleOp,
- * alimentador, cuenta de pelotas) habla con esta interfaz, así que cambiar el mecanismo
- * es escribir otra clase que la implemente y cambiar una línea en Robot.
+ * El intake ya cambió una vez (el rotor F2 salió en la v106 del CAD y entró la lengua de
+ * bandas). Todo lo demás (TeleOp, alimentador, cuenta de pelotas) habla con esta interfaz,
+ * así que cambiar el mecanismo es escribir otra clase que la implemente y cambiar una línea
+ * en Robot.
  */
 public interface Intake {
     enum Command { STOP, IN, OUT }
