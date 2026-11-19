@@ -12,13 +12,11 @@ import com.qualcomm.robotcore.hardware.Servo;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 import org.firstinspires.ftc.teamcode.Config.ImuCfg;
-import org.firstinspires.ftc.teamcode.Config.IntakeChoice;
 import org.firstinspires.ftc.teamcode.Config.Names;
 import org.firstinspires.ftc.teamcode.Config.SensorCfg;
 import org.firstinspires.ftc.teamcode.feeder.BallInventory;
 import org.firstinspires.ftc.teamcode.feeder.Feeder;
 import org.firstinspires.ftc.teamcode.intake.Intake;
-import org.firstinspires.ftc.teamcode.intake.IntakeF2;
 import org.firstinspires.ftc.teamcode.intake.IntakeLengua;
 import org.firstinspires.ftc.teamcode.sensors.BallSensor;
 import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
@@ -37,9 +35,8 @@ import java.util.List;
 /**
  * Todo el hardware del robot del CAD v99 en un solo lugar.
  *
- * 7 de 8 motores (4 de tracción, flywheel, M_F del intake y elevador) y 5 de 8 servos
- * (torreta, gap y ángulo del hood, fila y copa), como cuenta R503; con el intake de la
- * lengua, 6 de 8 (más el servo que la despliega).
+ * 7 de 8 motores (4 de tracción, flywheel, M_F del intake y elevador) y 6 de 8 servos
+ * (torreta, gap y ángulo del hood, fila, copa y lengua del intake), como cuenta R503.
  *
  * El constructor ya manda el hood a lo guardado, la torreta al frente y la copa abajo: si
  * dan Play mientras se construye (la cámara y el Limelight tardan), no se queda nada sin
@@ -97,26 +94,15 @@ public class Robot {
                 new BeamSensor(hardwareMap, Names.BEAM_FILA, SensorCfg.BEAM_ACTIVE_HIGH));
         feeder.initHardware(System.nanoTime());
 
-        // Para cambiar de intake: otra clase que implemente Intake, aquí (IntakeChoice).
-        if (IntakeChoice.USE_LENGUA) {
-            intake = new IntakeLengua(
-                    hardwareMap.get(DcMotorEx.class, Names.INTAKE_MOTOR),
-                    hardwareMap.get(Servo.class, Names.TONGUE_SERVO),
-                    new BeamSensor(hardwareMap, Names.BEAM_MOUTH, SensorCfg.BEAM_ACTIVE_HIGH),
-                    new BeamSensor(hardwareMap, Names.BEAM_THROAT, SensorCfg.BEAM_ACTIVE_HIGH),
-                    colorSensor(hardwareMap, Names.COLOR_THROAT, SensorCfg.THROAT),
-                    new RivalNectarDetector(hardwareMap, alliance),
-                    alliance);
-        } else {
-            intake = new IntakeF2(
-                    hardwareMap.get(DcMotorEx.class, Names.INTAKE_MOTOR),
-                    new BeamSensor(hardwareMap, Names.MAGNET_F2, SensorCfg.MAGNET_ACTIVE_HIGH),
-                    new BeamSensor(hardwareMap, Names.BEAM_MOUTH, SensorCfg.BEAM_ACTIVE_HIGH),
-                    new BeamSensor(hardwareMap, Names.BEAM_THROAT, SensorCfg.BEAM_ACTIVE_HIGH),
-                    colorSensor(hardwareMap, Names.COLOR_THROAT, SensorCfg.THROAT),
-                    new RivalNectarDetector(hardwareMap, alliance),
-                    alliance);
-        }
+        // Para cambiar de intake: otra clase que implemente Intake, aquí.
+        intake = new IntakeLengua(
+                hardwareMap.get(DcMotorEx.class, Names.INTAKE_MOTOR),
+                hardwareMap.get(Servo.class, Names.TONGUE_SERVO),
+                new BeamSensor(hardwareMap, Names.BEAM_MOUTH, SensorCfg.BEAM_ACTIVE_HIGH),
+                new BeamSensor(hardwareMap, Names.BEAM_THROAT, SensorCfg.BEAM_ACTIVE_HIGH),
+                colorSensor(hardwareMap, Names.COLOR_THROAT, SensorCfg.THROAT),
+                new RivalNectarDetector(hardwareMap, alliance),
+                alliance);
 
         vision = new CellVision(hardwareMap, alliance);
 
@@ -139,8 +125,8 @@ public class Robot {
 
     /**
      * Llamar en cada ciclo de INIT (R103.B): torreta al frente, hood a su casa, copa abajo
-     * y suelta, intake listo (F2 estacionado o lengua plegada y suelta). Regresa true cuando
-     * ya quedó en la configuración de inicio.
+     * y suelta, lengua del intake plegada y suelta. Regresa true cuando ya quedó en la
+     * configuración de inicio.
      */
     public boolean initStep(long nowNs) {
         beginLoop();
