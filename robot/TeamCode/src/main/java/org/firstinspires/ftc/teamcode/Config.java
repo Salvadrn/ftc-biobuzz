@@ -37,10 +37,9 @@ public final class Config {
         public static final String BEAM_MOUTH = "bbBoca";             // BB1
         public static final String BEAM_THROAT = "bbGarganta";
         public static final String BEAM_FILA = "bbFila";              // BB3
-        public static final String MAGNET_F2 = "magF2";               // REV-31-1462
         // Expansion Hub
         public static final String FLYWHEEL = "flywheel";
-        public static final String INTAKE_MOTOR = "intake";           // M_F (mueve F2 o la lengua)
+        public static final String INTAKE_MOTOR = "intake";           // M_F
         public static final String ELEVATOR = "elevador";
         public static final String HOOD_GAP_SERVO = "hoodGap";
         public static final String HOOD_ANGLE_SERVO = "hoodAngulo";
@@ -368,62 +367,7 @@ public final class Config {
         public static double FILA_JAM_COOLDOWN_S = 3.0;
     }
 
-    public static final class IntakeF2Cfg {
-        public static boolean REVERSED = false;   // CALIBRAR: + tiene que jalar hacia adentro
-        public static double IN_POWER = 1.0;
-
-        /** CALC: 145.1 cuentas por vuelta de M_F x 30/20 de la banda = 217.65 por vuelta de F2. */
-        public static double TICKS_PER_ROTOR_REV = 145.1 * 30.0 / 20.0;
-
-        /** Estacionado (spec F2 §2.10): despacio, primero en un sentido y luego en el otro. */
-        public static double PARK_SEARCH_TICKS_PER_S = 40;   // ≈ 66°/s del rotor
-        public static double PARK_CLEAR_DEG = 25;
-        /** El primer flanco solo cuenta si antes se vio el imán ausente al menos esto. */
-        public static double PARK_ARM_DEG = 4;
-        /** CALIBRAR: dónde queda 0° respecto al centro del imán (marca grabada en el disco). */
-        public static double INDEX_OFFSET_DEG = 0;
-        /** Tolerancia del hub en RUN_TO_POSITION: 1 cuenta = 1.65° (R102 deja ±5°). */
-        public static int PARK_TOLERANCE_TICKS = 1;
-        /** Se da por llegado tras estar dentro de 2 cuentas este tiempo (el hub termina de acercarse). */
-        public static double GOTO_SETTLE_S = 0.06;
-        public static int GOTO_ACCEPT_TICKS = 2;
-        public static double PARK_STEP_TIMEOUT_S = 6;
-        public static double GOTO_POWER = 0.3;
-
-        /** Modo lleno (G407): F2 se queda en +25° en BRAKE. */
-        public static double FULL_HOLD_DEG = 25;
-        public static double FULL_GOTO_TIMEOUT_S = 1.0;
-
-        /** Una pelota tiene que cortar el haz de la garganta al menos esto para contarse. */
-        public static double THROAT_MIN_S = 0.03;
-        /** Y el haz tiene que quedar libre al menos esto antes de contar la siguiente (rebotes). */
-        public static double THROAT_CLEAR_S = 0.06;
-
-        /** Atasco (spec F2 §2.8). */
-        public static double UNJAM_MOUTH_S = 0.25;
-        public static int UNJAM_MAX_TRIES = 3;
-        public static double UNJAM_MIN_MS = 60;
-        public static double UNJAM_MAX_MS = 100;
-
-        /** G408: reversa de F2 y de la fila al ver una NECTAR rival adentro. */
-        public static double REJECT_S = 0.4;
-        /** Si la sigue viendo, la reversa sigue hasta esto; luego se detiene y avisa. */
-        public static double REJECT_MAX_S = 1.5;
-
-        /** Antes de ir a +25° en modo lleno, frena este tiempo (viene girando al 100 %). */
-        public static double FULL_BRAKE_S = 0.15;
-    }
-
-    /**
-     * Qué intake usa el robot. El 18-nov Adrián cambió F2 por la lengua de bandas con dedos
-     * colgantes. Se queda F2 hasta que el CAD dé los ángulos del servo de la lengua; al
-     * cambiar, también cambia la configuración de la Driver Station (README).
-     */
-    public static final class IntakeChoice {
-        public static boolean USE_LENGUA = false;
-    }
-
-    /** Garganta (break-beam que cuenta y V3 que dice el tipo), para el intake de la lengua. */
+    /** Garganta del intake: break-beam que cuenta y V3 que dice el tipo. */
     public static final class ThroatCfg {
         /** Una pelota tiene que cortar el haz al menos esto para contarse. */
         public static double MIN_S = 0.03;
@@ -432,46 +376,52 @@ public final class Config {
     }
 
     /**
-     * Intake de la lengua de bandas con dedos colgantes (CAD, 18-nov; el diseño final todavía
-     * está en plan). M_F mueve las bandas y los 4 dedos con la misma cadena que tenía F2; un
-     * servo 2000-0025-0002 despliega la lengua. No hay estacionado ni sensor magnético.
+     * Intake de la lengua de bandas con dedos colgantes (CAD, 18-nov; sustituye a F2, que salió
+     * del CAD en la v106; la lengua todavía no está modelada). M_F mueve las bandas y los 4
+     * dedos; un servo 2000-0025-0002 con manivela y biela despliega la lengua.
      */
     public static final class IntakeLenguaCfg {
-        /** CAD: + = jalar (las bandas no invierten el giro, igual que F2). CONFIRMAR en el robot. */
+        /** CAD: + = jalar (las bandas no invierten el giro). CONFIRMAR en el robot. */
         public static boolean REVERSED = false;
         /** CAD: al 100 % las bandas van a ~1.5 m/s sin carga. */
         public static double IN_POWER = 1.0;
 
         /**
-         * PENDIENTE del CAD (sale del diseño de la palanca y la biela). Mientras, las tres
-         * posiciones valen lo mismo y el servo no se mueve. 0.15°/µs; 1500 µs = centro.
-         *  - Plegada: recargada por su peso en el tope de atrás; PWM apagado.
+         * PENDIENTE del CAD: los µs salen cuando el servo esté modelado (el sentido del PWM
+         * todavía no está verificado). Mientras, las dos posiciones valen lo mismo y el servo no
+         * se mueve. 0.15°/µs; 1500 µs = centro.
+         *  - Plegada (inicio): recargada por su peso en el tope de atrás; PWM apagado.
          *  - Abajo: en el tope duro de abajo; PWM prendido (por ahora, CAD).
-         *  - Arriba (G407, 4 pelotas): PWM prendido, la gravedad la baja.
+         * Con 4 pelotas (G407) se queda ABAJO con M_F en BRAKE: subirla empujaría la 4a contra
+         * la flecha del pivote de la fila (CAD v106; falta que Adrián lo confirme).
          */
         public static double FOLDED_US = 1500;
         public static double DOWN_US = 1500;
-        public static double UP_US = 1500;
         /**
          * El servo no dice dónde está: "ya llegó" = este tiempo después de mandarla. CAD: 0.25 s
          * por 60° sin carga y la carga es chica; ~0.6 s un viaje completo. CONFIRMAR con el ángulo.
          */
         public static double TRAVEL_S = 0.6;
 
-        /** Atasco, igual que F2 (CAD): BB1 más de esto sin que la garganta cuente. */
+        /** Atasco (la misma regla que tenía F2, CAD): BB1 más de esto sin que la garganta cuente. */
         public static double UNJAM_MOUTH_S = 0.25;
         public static int UNJAM_MAX_TRIES = 3;
         public static double UNJAM_MIN_MS = 60;
         public static double UNJAM_MAX_MS = 100;
 
         /**
-         * G408: reversa de M_F y de la fila con la lengua ABAJO (arriba, los dedos no tocan la
+         * G408: reversa de M_F y de la fila con la lengua ABAJO (plegada, los dedos no tocan la
          * pelota). CAD: de la garganta a pasar F son ~0.1-0.2 s; se empieza con los de F2.
          */
         public static double REJECT_S = 0.4;
         public static double REJECT_MAX_S = 1.5;
     }
 
+    /**
+     * Cámara C270 que busca NECTAR rival frente al intake. CAD (llega en la tanda T11): se
+     * mueve a la esquina +X, lente en (x 178, y -220, z 160) mm, 15° hacia abajo y 10° hacia
+     * -X. NO calibrar con la pose vieja de la visera de F2.
+     */
     public static final class IntakeCameraCfg {
         public static int WIDTH_PX = 320;
         public static int HEIGHT_PX = 240;
@@ -488,8 +438,6 @@ public final class Config {
     public static final class SensorCfg {
         /** CALIBRAR: con pull-up, haz cortado = true. Si sale al revés, cambiar a false. */
         public static boolean BEAM_ACTIVE_HIGH = true;
-        /** REV-31-1462: activo bajo (imán presente = false). */
-        public static boolean MAGNET_ACTIVE_HIGH = false;
 
         /**
          * Ganancia de los V3 (es de software: el SDK multiplica y recorta a 1, así que con
