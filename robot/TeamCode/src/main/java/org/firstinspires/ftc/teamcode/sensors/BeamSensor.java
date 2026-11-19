@@ -4,12 +4,11 @@ import com.qualcomm.robotcore.hardware.DigitalChannel;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 /**
- * Break-beam Adafruit 2168 (receptor con salida de colector abierto) o el REV Magnetic
- * Limit Switch. Los dos dan una entrada digital; el sentido se configura:
- * activeHigh = true si "activo" se lee como true.
+ * Break-beam Adafruit 2168 (receptor con salida de colector abierto) o cualquier otra
+ * entrada digital; el sentido se configura: activeHigh = true si "activo" se lee como true.
  *
  * Break-beam con pull-up: haz libre = el receptor jala a tierra = false; haz cortado
- * (hay pelota) = true. REV-31-1462: imán presente = false (activo bajo).
+ * (hay pelota) = true.
  */
 public class BeamSensor {
     private final DigitalChannel channel;
