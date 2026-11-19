@@ -29,7 +29,6 @@ import org.firstinspires.ftc.teamcode.vision.RivalNectarDetector;
  *    y distancia. Ajusta UPPER, COPA y THROAT y los rangos de ColorClassifier.
  *  - Corta cada break-beam con la mano: tiene que decir "cortado". Si dice lo contrario,
  *    cambia BEAM_ACTIVE_HIGH.
- *  - Acerca el imán al REV-31-1462: tiene que decir "presente".
  *  - Con el tubo vacío, cada V3 tiene que dar color distinto de 0. "SIN LECTURA" es cable
  *    o I2C. "SATURADO" = bajar SensorCfg.COLOR_GAIN.
  *  - La C270 usa los rangos genéricos del SDK: revisa que vea una NECTAR azul a ~60 cm y
@@ -45,7 +44,6 @@ public class TestSensors extends LinearOpMode {
         BeamSensor mouth = beam(Names.BEAM_MOUTH, SensorCfg.BEAM_ACTIVE_HIGH);
         BeamSensor throatBeam = beam(Names.BEAM_THROAT, SensorCfg.BEAM_ACTIVE_HIGH);
         BeamSensor filaBeam = beam(Names.BEAM_FILA, SensorCfg.BEAM_ACTIVE_HIGH);
-        BeamSensor magnet = beam(Names.MAGNET_F2, SensorCfg.MAGNET_ACTIVE_HIGH);
         Limelight3A limelight = hardwareMap.tryGet(Limelight3A.class, Names.LIMELIGHT);
         if (limelight != null) limelight.start();
         RivalNectarDetector camera = new RivalNectarDetector(hardwareMap, Alliance.RED);
@@ -61,7 +59,6 @@ public class TestSensors extends LinearOpMode {
             telemetry.addData("BB1 boca", state(mouth, "cortado", "libre"));
             telemetry.addData("BB garganta", state(throatBeam, "cortado", "libre"));
             telemetry.addData("BB3 fila", state(filaBeam, "cortado", "libre"));
-            telemetry.addData("Imán F2", state(magnet, "presente", "no"));
 
             if (limelight == null) {
                 telemetry.addData("Limelight", "no configurado");
