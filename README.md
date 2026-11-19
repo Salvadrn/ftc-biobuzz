@@ -258,11 +258,14 @@ Abrir la carpeta `robot/` en Android Studio y correr `TeamCode` sobre el Control
 
 - Todos los valores MEDIR y CALIBRAR de `Config.java`.
 - Confirmar el reparto de puertos y rehacer la hoja de cableado con él.
-- Intake de la lengua (todavía no está en el CAD): faltan los µs de plegada y abajo, el
-  tiempo real del viaje y la C270 en su lugar nuevo (no calibrar la cámara con la pose
-  vieja). Faltan decisiones de Adrián: cuándo baja la lengua, que con 4 pelotas se quede
-  abajo, y la precarga (propuesta del CAD: 3 POLLEN adentro y la 4a en la loseta tocando
-  el frente).
+- Intake de la lengua (todavía no está en el CAD): faltan los µs de plegada y abajo (tandas
+  T6-T7), el tiempo real del viaje y la C270 en su lugar nuevo (T11; no calibrar la cámara
+  con la pose vieja).
+- Decidido por Adrián (19-nov): con 4 pelotas la lengua se queda abajo con M_F en BRAKE, y
+  la precarga es de 3 POLLEN adentro (2 en el tubo y 1 en la fila) con la 4a en la loseta
+  tocando el frente; el autónomo la mete al desplegar. En el TeleOp la lengua baja con el
+  intake prendido y menos de 4 pelotas (propuesta del CAD), y no se vuelve a plegar en el
+  partido (el plan lo permitiría con 3 o menos y la garganta libre, p. ej. para defensa).
 - Autónomo.
 
 ## Otros
