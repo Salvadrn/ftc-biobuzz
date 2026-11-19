@@ -101,7 +101,7 @@ public class TuneShooter extends LinearOpMode {
                 robot.feeder.update(now, false, false, false, robot.flywheel.consumeShotDip(),
                         robot.flywheel.isEnabled());
 
-                // Intake quieto: si dieron Play a medio estacionado, esto apaga M_F
+                // Intake quieto: M_F parado y la lengua donde esté
                 robot.intake.setCommand(Intake.Command.STOP);
                 robot.intake.update(now, robot.inventory.isFull());
 
