@@ -527,6 +527,8 @@ public class Feeder {
     public BallType upperBall() { return upperSensor.last(); }
     public BallType copaBall() { return copaSensor.last(); }
     public boolean filaHasBall() { return filaBeam.isActive(); }
+    /** La fila está jalando hacia adentro: la siguiente pelota del intake puede entrar. */
+    public boolean isFilaPullingIn() { return filaMode == FilaMode.IN; }
     public double getCopaMm() { return copaCmdMm; }
     /** Distancia que lee el V3 de arriba, en mm (NaN sin lectura). */
     public double upperDistanceMm() { return upperSensor.distanceMm(); }
