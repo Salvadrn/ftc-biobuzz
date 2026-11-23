@@ -14,21 +14,29 @@ import org.firstinspires.ftc.teamcode.sensors.BallSensor;
 import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
 
 /**
- * Camino de la pelota del CAD v99, desde la fila hasta el flywheel:
+ * Camino de la pelota del CAD (v99 a v145, sin cambios aquí), desde la fila hasta el flywheel:
  *
  *   fila (rodillo con servo continuo, break-beam BB3)
- *     -> copa (aro en cremallera, servo de posición, 0 a 54 mm; V3 de z 50)
+ *     -> copa (aro en cremallera, servo de posición, 0 a 54 mm; V3 de z 52)
  *     -> etapa de arriba (Gecko de z 128 movida por el motor del elevador y una loca
- *        con resorte; V3 de z 126)
+ *        con resorte; V3 de z 128)
  *     -> flywheel.
  *
  * Una pelota por etapa (confirmado por la sesión del CAD el 17-nov):
  *  - Disparar = prender el elevador hacia arriba hasta que la pelota de arriba se vaya.
- *  - Rellenar = la copa sube la pelota de abajo hasta las Gecko de z 95, el elevador a
- *    baja potencia la sube hasta que el V3 de arriba la vea, y la copa baja a 0.
+ *  - Rellenar = la copa sube la pelota de abajo hasta las Gecko de z 95, el elevador la
+ *    sube a su etapa y la copa baja a 0. El V3 de arriba ve la pelota ANTES de que llegue:
+ *    su distancia baja a un mínimo con el centro de la pelota a la altura del lente y vuelve
+ *    a subir. Así que, ya vista, sube despacio hasta que la distancia pasa su mínimo y un
+ *    tramo más (FeederCfg.LIFT_*), para dejarla entre z 144.8 (no toca una NECTAR en la
+ *    copa) y el flywheel (documento del CAD v138, 4.7).
+ *  - "Hay pelota arriba" se decide con la copa abajo, antes de subir. Mientras la copa sube,
+ *    el V3 de arriba puede ver la pelota que va en la copa: solo se aborta si ve algo con la
+ *    copa debajo de COPA_UPPER_BLIND_MM, o si se queda sin lectura.
  *  - Con la copa ABAJO, las Gecko no tocan la pelota de la copa: disparar no la mueve.
  *  - La copa NUNCA sube si hay pelota esperando arriba (las dos se tocarían).
- *  - La fila carga la copa solo con la copa abajo.
+ *  - La fila carga la copa solo con la copa abajo. Con la copa ocupada, la 3a se para en el
+ *    primer corte de BB3 y sigue FILA_SEAT_S para asentarse.
  *
  * Fallas que se cuidan (revisión del 17-nov):
  *  - Un V3 sin lectura cuenta como OCUPADO (BallSensor da UNKNOWN): la copa no sube.
@@ -77,10 +85,16 @@ public class Feeder {
     private int refillFails = 0;
     private boolean refillBlocked = false;
     private boolean liftCheck = false;             // falló un rellenado: ¿regresó la pelota a la copa?
+    private boolean liftSeen = false;              // el V3 de arriba ya vio la que sube
+    private double liftFirstMm, liftMinMm;
+    private long liftPassNs = -1;                  // la distancia ya pasó su mínimo
+    private String liftTrace = "";                 // cómo terminó la última subida (para calibrar)
 
     // Fila
     private FilaMode filaMode = FilaMode.STOP;
     private boolean filaCommanded = false;
+    private boolean filaBeamWas = false;
+    private long filaSeatUntilNs = -1;
     private long filaPushStartNs = -1;
     private long filaUnjamUntilNs = -1;
     private int filaUnjamTries = 0;
@@ -241,7 +255,9 @@ public class Feeder {
 
             case COPA_UP:
                 elevator.setPower(0);
-                if (upperOccupied) {                        // apareció pelota arriba: no subir
+                // Más arriba de COPA_UPPER_BLIND_MM lo que ve puede ser la que va en la copa
+                if (upperFault || (upperSeen && copaCmdMm < FeederCfg.COPA_UPPER_BLIND_MM)) {
+                    if (upperSeen) refillFailed("el V3 de arriba vio algo al empezar a subir la copa");
                     copaTargetMm = 0;
                     enter(State.COPA_DOWN, nowNs);
                 } else if (copaArrived(nowNs)) {
@@ -254,20 +270,7 @@ public class Feeder {
                 break;
 
             case LIFT:
-                if (upperOccupied) {
-                    elevator.setPower(0);
-                    if (upperSeen) refillFails = 0;
-                    copaTargetMm = 0;
-                    enter(State.COPA_DOWN, nowNs);
-                } else if (secondsIn(nowNs) >= FeederCfg.LIFT_TIMEOUT_S) {
-                    elevator.setPower(0);
-                    refillFailed("la pelota no subió a la etapa de arriba");
-                    liftCheck = true;
-                    copaTargetMm = 0;
-                    enter(State.COPA_DOWN, nowNs);
-                } else {
-                    elevator.setPower(FeederCfg.ELEVATOR_STAGE_POWER);
-                }
+                updateLift(nowNs, upperSeen, upperFault);
                 break;
 
             case COPA_DOWN:
@@ -303,6 +306,55 @@ public class Feeder {
         refillFails++;
         if (refillFails >= FeederCfg.REFILL_MAX_FAILS) refillBlocked = true;
         warning = why;
+    }
+
+    /**
+     * Subir la pelota de la copa a su etapa (documento del CAD v138, 4.7): a ELEVATOR_STAGE_POWER
+     * hasta que el V3 de arriba la ve; luego a LIFT_SEAT_POWER, siguiendo la distancia hasta que
+     * sube LIFT_PASS_MM sobre su mínimo (el centro ya pasó el lente, z 128), y LIFT_EXTRA_MM más.
+     */
+    private void updateLift(long nowNs, boolean upperSeen, boolean upperFault) {
+        if (upperFault) {                          // sin lectura no se sabe dónde va: se detiene
+            elevator.setPower(0);
+            liftTrace = "V3 de arriba sin lectura a medio subir";
+            endLift(nowNs);
+            return;
+        }
+        double d = upperSensor.distanceMm();
+        if (!liftSeen && upperSeen) {
+            liftSeen = true;
+            liftFirstMm = liftMinMm = d;
+        }
+        if (liftSeen && liftPassNs < 0) {
+            liftMinMm = Math.min(liftMinMm, d);
+            if (d > liftMinMm + FeederCfg.LIFT_PASS_MM) liftPassNs = nowNs;
+        }
+        double extraS = FeederCfg.LIFT_EXTRA_MM / FeederCfg.LIFT_SEAT_MM_S;
+        if (liftPassNs >= 0 && (nowNs - liftPassNs) / 1e9 >= extraS) {
+            elevator.setPower(0);
+            refillFails = 0;
+            liftTrace = String.format("vista a %.1f mm, mínimo %.1f mm, pasó a %.2f s; %.0f mm más",
+                    liftFirstMm, liftMinMm, (liftPassNs - stateStartNs) / 1e9, FeederCfg.LIFT_EXTRA_MM);
+            endLift(nowNs);
+        } else if (secondsIn(nowNs) >= FeederCfg.LIFT_TIMEOUT_S) {
+            elevator.setPower(0);
+            if (liftSeen) {                        // está arriba, pero no pasó el lente: quedó baja
+                warning = "la pelota de arriba quedó baja (no pasó el V3 de arriba)";
+                liftTrace = String.format("vista a %.1f mm, mínimo %.1f mm, NUNCA pasó", liftFirstMm, liftMinMm);
+            } else {
+                refillFailed("la pelota no subió a la etapa de arriba");
+                liftCheck = true;
+                liftTrace = "el V3 de arriba nunca la vio";
+            }
+            endLift(nowNs);
+        } else {
+            elevator.setPower(liftSeen ? FeederCfg.LIFT_SEAT_POWER : FeederCfg.ELEVATOR_STAGE_POWER);
+        }
+    }
+
+    private void endLift(long nowNs) {
+        copaTargetMm = 0;
+        enter(State.COPA_DOWN, nowNs);
     }
 
     // ---------- copa ----------
@@ -360,6 +412,13 @@ public class Feeder {
         boolean copaBusy = state == State.COPA_UP || state == State.LIFT || state == State.COPA_DOWN
                 || !copaIsDown() || liftCheck;
 
+        // La 3a (copa ocupada) llega a BB3 y la fila se detiene en el primer corte, a 28-33 mm de
+        // su lugar del CAD (y -112): sigue FILA_SEAT_S más para asentarla.
+        if (filaHasBall && !filaBeamWas && copaHasBall && filaMode == FilaMode.IN) {
+            filaSeatUntilNs = nowNs + (long) (FeederCfg.FILA_SEAT_S * 1e9);
+        }
+        filaBeamWas = filaHasBall;
+
         // Atorada: se queda apagada hasta que algo cambie (entonces vuelve a tener todos sus
         // intentos) o pase el tiempo de espera (entonces, un solo empujón más)
         if (filaJammed) {
@@ -383,6 +442,8 @@ public class Feeder {
             want = FilaMode.IN;                    // cargar la copa
         } else if (copaHasBall && !filaHasBall && intakeFeeding) {
             want = FilaMode.IN;                    // jalar la siguiente a la fila
+        } else if (copaHasBall && filaHasBall && nowNs < filaSeatUntilNs) {
+            want = FilaMode.IN;                    // asentar la 3a
         } else {
             want = FilaMode.STOP;
         }
@@ -438,6 +499,13 @@ public class Feeder {
     private void enter(State s, long nowNs) {
         state = s;
         stateStartNs = nowNs;
+        if (s == State.LIFT) {
+            liftSeen = false;
+            liftPassNs = -1;
+            liftFirstMm = liftMinMm = Double.NaN;
+        }
+        // Mientras sube la pelota, el V3 de arriba se lee más seguido (fin de LIFT)
+        upperSensor.setMinIntervalS(s == State.LIFT ? FeederCfg.LIFT_READ_INTERVAL_S : Double.NaN);
     }
 
     private double secondsIn(long nowNs) {
@@ -459,6 +527,18 @@ public class Feeder {
     public BallType copaBall() { return copaSensor.last(); }
     public boolean filaHasBall() { return filaBeam.isActive(); }
     public double getCopaMm() { return copaCmdMm; }
+    /** Distancia que lee el V3 de arriba, en mm (NaN sin lectura). */
+    public double upperDistanceMm() { return upperSensor.distanceMm(); }
+    /** Cómo terminó la última subida a la etapa de arriba (para calibrar FeederCfg.LIFT_*). */
+    public String liftTrace() { return liftTrace; }
+
+    /**
+     * Solo para "Tune: Alimentador" en modo manual (con initUpdate): lleva la copa a esta
+     * altura, de 0 a COPA_TRAVEL_MM, con la rampa de siempre.
+     */
+    public void setCopaTargetForTuning(double mm) {
+        copaTargetMm = Range.clip(mm, 0, FeederCfg.COPA_TRAVEL_MM);
+    }
     public String getWarning() { return warning; }
     public boolean isClearPending() { return clearPending; }
     public boolean isRefillBlocked() { return refillBlocked; }
