@@ -34,8 +34,10 @@ import java.util.Random;
  *    cortando solo BB1 (documento del CAD v138, 4.6).
  *  - Al dar Play se queda plegada. Baja cuando el intake está prendido y no está lleno
  *    (decidido por Adrián el 19-nov, con la precarga de 3 adentro + 1 en la loseta).
- *  - Con 4 pelotas (G407) se queda ABAJO y M_F para en BRAKE. Con las 3 etapas del
- *    alimentador ocupadas, una pelota en BB1 es la 4a, no un atasco (4.5).
+ *  - Con 4 pelotas (G407) se queda ABAJO y M_F para en BRAKE.
+ *  - Si la fila no está jalando (tiene pelota, o la copa está ocupada o moviéndose), una
+ *    pelota en la boca o en la garganta ESPERA: M_F para en BRAKE (no la empuja contra la
+ *    pelota de la fila) y no cuenta como atasco. Con las 3 etapas ocupadas, esa es la 4a (4.5).
  *  - Abajo, PWM prendido. M_F solo jala con la lengua abajo.
  *
  * Jalar al 100 %, atasco por BB1, cuenta en la garganta (ThroatCounter) y G408 con la
@@ -64,7 +66,7 @@ public class IntakeLengua implements Intake {
     private State state = State.IDLE;
     private Command command = Command.STOP;
     private boolean rivalOverride = false;
-    private boolean stagesFull = false;
+    private boolean filaAccepting = true;
     private long lastNs = 0;
 
     private boolean initDone = false;
@@ -146,9 +148,9 @@ public class IntakeLengua implements Intake {
     }
 
     @Override
-    public void update(long nowNs, boolean robotFull, boolean stagesFull) {
+    public void update(long nowNs, boolean robotFull, boolean filaAccepting) {
         lastNs = nowNs;
-        this.stagesFull = stagesFull;
+        this.filaAccepting = filaAccepting;
         throat.update(nowNs, state == State.PULLING, state == State.EJECTING);
         trackMouth(nowNs);
         if (!IntakeLenguaCfg.CALIBRATED) {            // seguro: nada se mueve
@@ -257,8 +259,13 @@ public class IntakeLengua implements Intake {
                     mouthSinceNs = -1;
                     break;
                 }
+                if (!filaAccepting && (mouth.isActive() || throat.hasBall())) {
+                    setMotor(0);                         // espera a que la fila jale (BRAKE): no es atasco
+                    mouthSinceNs = -1;
+                    break;
+                }
                 setMotor(IntakeLenguaCfg.IN_POWER);
-                if (mouth.isActive() && !stagesFull) {   // atasco en la boca (con las 3 etapas llenas es la 4a)
+                if (mouth.isActive()) {                  // atasco en la boca
                     if (mouthSinceNs < 0) mouthSinceNs = nowNs;
                     if ((nowNs - mouthSinceNs) / 1e9 >= IntakeLenguaCfg.UNJAM_MOUTH_S) {
                         mouthSinceNs = -1;
