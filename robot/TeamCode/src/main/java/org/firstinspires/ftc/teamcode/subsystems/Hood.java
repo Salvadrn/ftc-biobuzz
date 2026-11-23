@@ -13,18 +13,27 @@ import org.firstinspires.ftc.teamcode.Config.Names;
 import org.firstinspires.ftc.teamcode.util.StateStore;
 
 /**
- * Hood de gap variable del CAD v99, con DOS servos 2000-0025-0002 en modo posición.
+ * Hood de gap variable del CAD (v99 a v145, sin cambios en lo que usa esto), con DOS servos
+ * 2000-0025-0002 en modo posición.
  *
- *  - Servo de GAP: gira el eslabón alrededor de Q. Gap 0° = POLLEN (63.0 mm de luz),
- *    gap -34.3° = NECTAR (79.7 mm). El CAD permite -34.5 a +0.5.
- *  - Servo de ÁNGULO: va montado EN el eslabón y gira el hood alrededor de P.
+ *  - Servo de GAP: gira el eslabón alrededor de Q. Gap 0° = tope de POLLEN (63.0 mm de luz),
+ *    GAP_NECTAR_DEG = tope de NECTAR (~80 mm). Entre los dos topes el eslabón gira 36.1°
+ *    (CALC; se calibra en "Tune: Hood").
+ *  - Servo de ÁNGULO: va montado EN el eslabón y gira el hood alrededor de P. Está montado al
+ *    revés que el de gap (estriados hacia +X y -X): sus µs por grado llevan signo contrario.
  *
  * LEY OBLIGATORIA (guía del CAD, 17-nov): comando del servo de ángulo = -gap + δ, donde δ
- * es la inclinación real del hood. Así, al abrir el gap el hood se traslada sin girar.
- * Si el servo de ángulo no compensa, el hood gira con el eslabón:
- *  - gap -34.3 con ángulo 0 (δ = -34.3): la lámina se mete en la Limelight; ya con δ ≤ -20 le pega.
+ * es la inclinación real del hood (positivo cierra: la punta baja hacia el flywheel). Así, al
+ * abrir el gap el hood se traslada sin girar. Si el servo de ángulo no compensa (o gira al
+ * revés), el hood gira con el eslabón:
+ *  - gap de NECTAR con ángulo 0 (δ ≈ -36): la lámina se mete en la Limelight; ya con
+ *    δ ≤ -18.3 le pega. Con el signo del ángulo al revés, δ ≈ -69°.
  *  - gap 0 con ángulo ≥ 35.4: la lámina toca las FlatTop.
  * Envolvente segura: δ entre -10° y +10° con cualquier gap. En uso, δ de -10° a 0°.
+ *
+ * SEGURO (documento del CAD v138, 4.1): si los signos de los dos servos no cuadran con cómo
+ * están montados (HoodCfg.SERVOS_FACE_OPPOSITE), el hood no va a NECTAR: se queda en POLLEN,
+ * avisa y no se da por listo para una pelota que necesita el gap de NECTAR.
  *
  * Por eso aquí:
  *  1. Los dos servos se escriben SIEMPRE juntos, en cada ciclo, con la ley.
@@ -40,6 +49,9 @@ public class Hood {
     private static final String KEY_GAP = "hood.gap";
     private static final String KEY_DELTA = "hood.delta";
 
+    /** Con los signos sin cuadrar, "Tune: Hood" solo mueve el gap hasta aquí (la prueba de 2.5°). */
+    public static final double UNCHECKED_GAP_LIMIT_DEG = 5.0;
+
     private final Servo gapServo;
     private final Servo angleServo;
     private final StateStore store;
@@ -51,6 +63,7 @@ public class Hood {
     private double deltaMaxDeg = HoodCfg.DELTA_USE_MAX_DEG;
 
     private boolean started = false;
+    private boolean nectarRefused = false;      // pidieron NECTAR con los signos sin cuadrar
     private long settleUntilNs = 0;
     private long lastUpdateNs = 0;
     private long lastPersistNs = 0;
@@ -102,6 +115,30 @@ public class Hood {
         return -gapDeg + deltaDeg;
     }
 
+    /** Recorrido del servo de ángulo: la ley con la envolvente segura en los dos topes del gap. */
+    public static double angleMinDeg() {
+        return Math.min(angleServoDeg(HoodCfg.GAP_POLLEN_DEG, HoodCfg.DELTA_SAFE_MIN_DEG),
+                angleServoDeg(HoodCfg.GAP_NECTAR_DEG, HoodCfg.DELTA_SAFE_MIN_DEG));
+    }
+
+    public static double angleMaxDeg() {
+        return Math.max(angleServoDeg(HoodCfg.GAP_POLLEN_DEG, HoodCfg.DELTA_SAFE_MAX_DEG),
+                angleServoDeg(HoodCfg.GAP_NECTAR_DEG, HoodCfg.DELTA_SAFE_MAX_DEG));
+    }
+
+    /**
+     * Los signos de los dos servos cuadran con cómo están montados (documento del CAD v138,
+     * 4.1): con SERVOS_FACE_OPPOSITE, los µs por grado del gap y del ángulo tienen signo
+     * contrario. Si no, ir a NECTAR giraría la lámina contra la Limelight.
+     */
+    public static boolean signsConsistent() {
+        double gapUsPerDeg = (HoodCfg.GAP_NECTAR_US - HoodCfg.GAP_POLLEN_US)
+                / (HoodCfg.GAP_NECTAR_DEG - HoodCfg.GAP_POLLEN_DEG);
+        if (gapUsPerDeg == 0 || Double.isNaN(gapUsPerDeg) || HoodCfg.ANGLE_US_PER_DEG == 0) return false;
+        double expected = HoodCfg.SERVOS_FACE_OPPOSITE ? -Math.signum(gapUsPerDeg) : Math.signum(gapUsPerDeg);
+        return Math.signum(HoodCfg.ANGLE_US_PER_DEG) == expected;
+    }
+
     // ---------- arranque ----------
 
     /**
@@ -120,10 +157,15 @@ public class Hood {
 
     // ---------- órdenes ----------
 
-    /** Gap para la pelota que va a salir. NONE no cambia nada. */
+    /**
+     * Gap para la pelota que va a salir. NONE no cambia nada. Con los signos sin cuadrar, una
+     * que necesita el gap de NECTAR deja el hood en POLLEN y isReady() da false.
+     */
     public void setGapFor(BallType ball) {
         if (ball == null || ball == BallType.NONE) return;
-        gapTargetDeg = ball.needsNectarGap() ? HoodCfg.GAP_NECTAR_DEG : HoodCfg.GAP_POLLEN_DEG;
+        boolean nectar = ball.needsNectarGap();
+        nectarRefused = nectar && !signsConsistent();
+        gapTargetDeg = nectar && !nectarRefused ? HoodCfg.GAP_NECTAR_DEG : HoodCfg.GAP_POLLEN_DEG;
     }
 
     /**
@@ -139,10 +181,27 @@ public class Hood {
 
     /**
      * Solo para "Tune: Hood": un gap intermedio (recortado al recorrido del eslabón), para
-     * probar el sentido con un movimiento corto antes de ir hasta NECTAR.
+     * probar el sentido con un movimiento corto antes de ir hasta NECTAR. Con los signos sin
+     * cuadrar, no más de UNCHECKED_GAP_LIMIT_DEG desde POLLEN.
      */
     public void setGapDegForTuning(double gapDeg) {
-        gapTargetDeg = clampGap(gapDeg);
+        double g = clampGap(gapDeg);
+        if (!signsConsistent()) {
+            g = Range.clip(g, HoodCfg.GAP_POLLEN_DEG - UNCHECKED_GAP_LIMIT_DEG,
+                    HoodCfg.GAP_POLLEN_DEG + UNCHECKED_GAP_LIMIT_DEG);
+        }
+        nectarRefused = false;
+        gapTargetDeg = g;
+    }
+
+    /**
+     * Solo para "Tune: Hood" (paso 6): cambió HoodCfg.GAP_NECTAR_DEG. El servo de gap no se
+     * mueve (en NECTAR sigue en GAP_NECTAR_US); solo cambia cuánto compensa el de ángulo.
+     */
+    public void nectarGapChanged(double oldNectarDeg) {
+        if (gapCmdDeg == oldNectarDeg) gapCmdDeg = HoodCfg.GAP_NECTAR_DEG;
+        if (gapTargetDeg == oldNectarDeg) gapTargetDeg = HoodCfg.GAP_NECTAR_DEG;
+        reapplyPwmRanges();
     }
 
     /** Solo para "Tune: Hood": permite toda la envolvente segura (δ de -10 a +10). */
@@ -173,15 +232,21 @@ public class Hood {
         persist(nowNs);
     }
 
-    /** true cuando el gap y δ ya llegaron a lo pedido y pasó el tiempo de asentarse. */
+    /**
+     * true cuando el gap y δ ya llegaron a lo pedido y pasó el tiempo de asentarse. false si
+     * la pelota pedida necesita el gap de NECTAR y el seguro de los signos lo impide.
+     */
     public boolean isReady(long nowNs) {
-        return started && gapCmdDeg == gapTargetDeg && deltaCmdDeg == deltaTargetDeg
+        return started && !nectarRefused && gapCmdDeg == gapTargetDeg && deltaCmdDeg == deltaTargetDeg
                 && nowNs >= settleUntilNs;
     }
 
     public boolean isNectarGap() {
         return gapTargetDeg == HoodCfg.GAP_NECTAR_DEG;
     }
+
+    /** Pidieron el gap de NECTAR y el seguro de los signos no lo deja (se quedó en POLLEN). */
+    public boolean isNectarRefused() { return nectarRefused; }
 
     public double getGapDeg() { return gapCmdDeg; }
     public double getDeltaDeg() { return deltaCmdDeg; }
@@ -227,11 +292,11 @@ public class Hood {
     }
 
     private static double angleUsLow() {
-        return Math.min(angleToUs(HoodCfg.ANGLE_MIN_DEG), angleToUs(HoodCfg.ANGLE_MAX_DEG));
+        return Math.min(angleToUs(angleMinDeg()), angleToUs(angleMaxDeg()));
     }
 
     private static double angleUsHigh() {
-        return Math.max(angleToUs(HoodCfg.ANGLE_MIN_DEG), angleToUs(HoodCfg.ANGLE_MAX_DEG));
+        return Math.max(angleToUs(angleMinDeg()), angleToUs(angleMaxDeg()));
     }
 
     public static double gapToPosition(double gapDeg) {
@@ -240,7 +305,7 @@ public class Hood {
     }
 
     public static double angleToPosition(double angleDeg) {
-        double a = Range.clip(angleDeg, HoodCfg.ANGLE_MIN_DEG, HoodCfg.ANGLE_MAX_DEG);
+        double a = Range.clip(angleDeg, angleMinDeg(), angleMaxDeg());
         return Range.clip((angleToUs(a) - angleUsLow()) / (angleUsHigh() - angleUsLow()), 0, 1);
     }
 
@@ -257,5 +322,9 @@ public class Hood {
         telemetry.addData("Hood", "gap %.1f° (%s)  δ %.1f°  servo ángulo %.1f°",
                 gapCmdDeg, isNectarGap() ? "NECTAR" : "POLLEN", deltaCmdDeg,
                 angleServoDeg(gapCmdDeg, deltaCmdDeg));
+        if (!signsConsistent()) {
+            telemetry.addLine("!! Hood: el signo del servo de ángulo no cuadra con el del gap "
+                    + "(HoodCfg): no va a NECTAR. Revisa con \"Tune: Hood\"");
+        }
     }
 }
