@@ -31,9 +31,16 @@ public interface Intake {
 
     /**
      * Llamar una vez por ciclo.
-     * @param robotFull ya hay 4 pelotas adentro (G407): no jalar más
+     * @param robotFull  ya hay 4 pelotas (G407): no jalar más
+     * @param stagesFull las 3 etapas del alimentador (arriba, copa, fila) están ocupadas: una
+     *                   pelota en la entrada es la 4a, no un atasco
      */
-    void update(long nowNs, boolean robotFull);
+    void update(long nowNs, boolean robotFull, boolean stagesFull);
+
+    /** Sin saber cómo va el alimentador (pruebas). */
+    default void update(long nowNs, boolean robotFull) {
+        update(nowNs, robotFull, false);
+    }
 
     /** Está metiendo pelotas: el alimentador puede jalar la siguiente a la fila. */
     boolean isFeeding();
@@ -50,15 +57,22 @@ public interface Intake {
     /** Pelotas que se sacaron (rechazadas) desde la última consulta. */
     int consumeRejected();
 
-    /** ¿Hay una pelota parada en la entrada del intake ahorita? (para la cuenta mínima) */
+    /** ¿Hay una pelota en el haz de la garganta ahorita? */
     boolean hasBallAtThroat();
+
+    /**
+     * ¿Hay una pelota esperando en la entrada (garganta, o la boca de forma continua)? Con las
+     * 3 etapas ocupadas, esa es la 4a: el robot está lleno aunque no haya cortado la garganta
+     * (documento del CAD v138, 4.5).
+     */
+    default boolean hasBallAtEntry() { return hasBallAtThroat(); }
 
     /** Tipo de la última pelota que entró. */
     BallType lastBallType();
 
     /**
-     * El piloto confirma que lo que ve la cámara de la visera no es una NECTAR rival y
-     * quiere jalar de todos modos. Intakes sin cámara lo ignoran.
+     * El piloto confirma que lo que ve la cámara C270 (esquina +X del intake) no es una NECTAR
+     * rival y quiere jalar de todos modos. Intakes sin cámara lo ignoran.
      */
     default void setRivalOverride(boolean ignoreCamera) {}
 
