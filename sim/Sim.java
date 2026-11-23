@@ -710,6 +710,7 @@ public class Sim {
         double upperSampleT = -1, upperSampleMm = 200;
         BallType upperSampleType = BallType.NONE;
         boolean encoderDead = false;      // el encoder del elevador no está conectado
+        double ballSpeedRatio = 1.0;      // la pelota sube a esta fracción de la superficie de las Gecko
         double upperNoiseMm = 0;          // ruido (desviación) de la distancia del V3 de arriba
         double upperFloorMm = 0;          // el V3 de arriba nunca marca menos que esto (curva más plana)
         Random noise = new Random(1);
@@ -919,7 +920,7 @@ public class Sim {
         }
         if (bw.lifting.isBall()) {
             if (ePow > 0.05) {
-                bw.liftZ += LIFT_MM_S_PER_POWER * ePow * dt;
+                bw.liftZ += bw.ballSpeedRatio * LIFT_MM_S_PER_POWER * ePow * dt;   // el encoder cuenta la superficie
                 if (bw.liftZ >= flywheelContactZ(bw.lifting)) {
                     bw.hazard = true;
                     bw.hazardWhy = String.format("tocó el flywheel subiendo a su etapa (centro en z %.1f)", bw.liftZ);
@@ -1231,7 +1232,7 @@ public class Sim {
                                 && r.f.liftTrace().contains(FeederCfg.LIFT_BY_ENCODER ? "con el encoder" : "pasó a"),
                         String.format("centro en z %.1f (%.1f a %.1f); %s %s", z, low, geckoHoldZ(pair[0]),
                                 r.f.liftTrace(), r.bw.hazardWhy));
-                java.util.regex.Matcher mz = java.util.regex.Pattern.compile("z ≈ ([0-9.]+)").matcher(r.f.liftTrace());
+                java.util.regex.Matcher mz = java.util.regex.Pattern.compile("z ≈ ([0-9]+[.][0-9]+)").matcher(r.f.liftTrace());
                 if (cone == 30 && pair[1] == N) {
                     check(String.format("el encoder del elevador da dónde quedó la %s (±1 mm)", pair[0] == N ? "NECTAR" : "POLLEN"),
                             mz.find() && Math.abs(Double.parseDouble(mz.group(1)) - z) <= 1.0, r.f.liftTrace());
@@ -1303,6 +1304,30 @@ public class Sim {
         FeederRig d = liftRig(0, 1, 0, 0.03);
         check("fin de LIFT: un parpadeo de 30 ms al empezar a subir no la deja baja", stagedInWindow(d),
                 String.format("z %.1f; %s", d.bw.upperZOrDefault(), d.f.liftTrace()));
+
+        // La pelota más lenta que las Gecko (CAD v146: entre la mitad y el total de la superficie)
+        double savedN = FeederCfg.LIFT_BALL_MM_PER_TICK_NECTAR;
+        try {
+            FeederRig slow = new FeederRig();
+            slow.bw.ballSpeedRatio = 0.8;
+            slow.bw.copa = BallType.NECTAR_RED;
+            slow.bw.fila = BallType.NECTAR_RED;
+            runRig(slow, 400, false);
+            double zs = slow.bw.upperZOrDefault();
+            check("pelota 20 % más lenta que las Gecko, sin calibrar: queda más baja, nunca más alta",
+                    zs <= geckoHoldZ(BallType.NECTAR_RED) && !slow.bw.hazardWhy.contains("flywheel"),
+                    String.format("z %.1f (toca la de la copa debajo de 144.8: calibrar LIFT_BALL_MM_PER_TICK)", zs));
+            FeederCfg.LIFT_BALL_MM_PER_TICK_NECTAR = 0.8 * FeederCfg.ELEVATOR_MM_PER_TICK;   // ya medido
+            FeederRig cal = new FeederRig();
+            cal.bw.ballSpeedRatio = 0.8;
+            cal.bw.copa = BallType.NECTAR_RED;
+            cal.bw.fila = BallType.NECTAR_RED;
+            runRig(cal, 400, false);
+            check("pelota 20 % más lenta, ya calibrada: vuelve a quedar entre la de la copa y las Gecko",
+                    stagedInWindow(cal), String.format("z %.1f; %s", cal.bw.upperZOrDefault(), cal.f.liftTrace()));
+        } finally {
+            FeederCfg.LIFT_BALL_MM_PER_TICK_NECTAR = savedN;
+        }
 
         // Sin encoder (sin cable): avisa y termina con el V3
         FeederRig dead = new FeederRig();
