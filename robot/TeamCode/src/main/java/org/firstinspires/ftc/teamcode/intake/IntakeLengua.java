@@ -36,8 +36,9 @@ import java.util.Random;
  *    (decidido por Adrián el 19-nov, con la precarga de 3 adentro + 1 en la loseta).
  *  - Con 4 pelotas (G407) se queda ABAJO y M_F para en BRAKE.
  *  - Si la fila no está jalando (tiene pelota, o la copa está ocupada o moviéndose), una
- *    pelota en la boca o en la garganta ESPERA: M_F para en BRAKE (no la empuja contra la
- *    pelota de la fila) y no cuenta como atasco. Con las 3 etapas ocupadas, esa es la 4a (4.5).
+ *    pelota en la boca, o en la garganta con la fila vacía, ESPERA: M_F para en BRAKE (no la
+ *    empuja contra la pelota de la fila) y no cuenta como atasco ni como llegada. Con las 3
+ *    etapas ocupadas, la de la boca es la 4a (4.5).
  *  - Abajo, PWM prendido. M_F solo jala con la lengua abajo.
  *
  * Jalar al 100 %, atasco por BB1, cuenta en la garganta (ThroatCounter) y G408 con la
@@ -67,6 +68,7 @@ public class IntakeLengua implements Intake {
     private Command command = Command.STOP;
     private boolean rivalOverride = false;
     private boolean filaAccepting = true;
+    private boolean filaHasBall = false;
     private long lastNs = 0;
 
     private boolean initDone = false;
@@ -148,10 +150,13 @@ public class IntakeLengua implements Intake {
     }
 
     @Override
-    public void update(long nowNs, boolean robotFull, boolean filaAccepting) {
+    public void update(long nowNs, boolean robotFull, boolean filaAccepting, boolean filaHasBall) {
         lastNs = nowNs;
         this.filaAccepting = filaAccepting;
-        throat.update(nowNs, state == State.PULLING, state == State.EJECTING);
+        this.filaHasBall = filaHasBall;
+        // Solo cuenta una llegada si M_F de verdad está jalando: esperando en BRAKE, una pelota
+        // que corta la garganta a ratos se contaría otra vez en cada corte
+        throat.update(nowNs, state == State.PULLING && motorPower > 0, state == State.EJECTING);
         trackMouth(nowNs);
         if (!IntakeLenguaCfg.CALIBRATED) {            // seguro: nada se mueve
             setMotor(0);
@@ -259,7 +264,10 @@ public class IntakeLengua implements Intake {
                     mouthSinceNs = -1;
                     break;
                 }
-                if (!filaAccepting && (mouth.isActive() || throat.hasBall())) {
+                // Una pelota que espera: en la boca, o en la garganta con la fila vacía (con
+                // pelota en la fila, lo que corta la garganta puede ser esa, sin asentar)
+                boolean waiting = mouth.isActive() || (throat.hasBall() && !filaHasBall);
+                if (!filaAccepting && waiting) {
                     setMotor(0);                         // espera a que la fila jale (BRAKE): no es atasco
                     mouthSinceNs = -1;
                     break;
@@ -397,11 +405,13 @@ public class IntakeLengua implements Intake {
         return throat.hasBall();
     }
 
-    /** En la garganta, o en la boca (BB1) de forma continua FULL_MOUTH_S. */
+    /**
+     * En la boca (BB1) de forma continua FULL_MOUTH_S: la 4a la corta en todos los casos. La
+     * garganta no: con las 3 etapas ocupadas, la puede estar cortando la 3a misma.
+     */
     @Override
     public boolean hasBallAtEntry() {
-        return throat.hasBall()
-                || (mouthHeldSinceNs >= 0 && (lastNs - mouthHeldSinceNs) / 1e9 >= IntakeLenguaCfg.FULL_MOUTH_S);
+        return mouthHeldSinceNs >= 0 && (lastNs - mouthHeldSinceNs) / 1e9 >= IntakeLenguaCfg.FULL_MOUTH_S;
     }
 
     @Override
