@@ -13,8 +13,14 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
  * TeleOp de competencia. La alianza decide qué tags se siguen y qué NECTAR se rechaza.
  *
  * INIT (R103.B): torreta al frente, hood a su casa, copa abajo y la lengua del intake
- *   plegada y suelta (no se pliega con una pelota en la garganta: hay que sacarla).
+ *   plegada y suelta (no se pliega con una pelota en la boca o en la garganta: hay que
+ *   sacarla). Sin calibrar (IntakeLenguaCfg.CALIBRATED) la lengua y M_F no se mueven: se
+ *   pliega a mano.
  *   Gamepad 2 dpad arriba/abajo: cuántas pelotas van precargadas (para la cuenta de G407).
+ *
+ * LLENO (G407): por la cuenta, o con arriba, copa y fila ocupadas y otra pelota en la
+ *   entrada del intake (la 4a se queda en la boca). Lleno, la lengua se queda abajo y M_F
+ *   para en BRAKE.
  *
  * GAMEPAD 1 (piloto)
  *   stick izquierdo        avanzar y moverse de lado
@@ -122,7 +128,7 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
                     : intakeOn ? Intake.Command.IN : Intake.Command.STOP;
             robot.intake.setCommand(cmd);
             robot.intake.setRivalOverride(gamepad1.b);
-            robot.intake.update(now, robot.inventory.isFull());
+            robot.intake.update(now, robot.isFull(), robot.stagesFull());
 
             // ----- tiro -----
             robot.shooter.update(now, distanceFresh ? last.distanceIn : Double.NaN, robot.feeder.nextBall());
@@ -154,9 +160,9 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
             wasReady = readyToFire;
 
             // ----- telemetría -----
-            telemetry.addData("Alianza", "%s   apuntado %s   pelotas %d/4%s", alliance(),
+            telemetry.addData("Alianza", "%s   apuntado %s   pelotas %d/4%s%s", alliance(),
                     autoAim ? "AUTO" : "manual", robot.inventory.count(),
-                    robot.inventory.isFull() ? " LLENO" : "");
+                    robot.fourthAtEntry() ? " +1 en la entrada" : "", robot.isFull() ? " LLENO" : "");
             telemetry.addData("TIRO", readyToFire ? ">>> LISTO <<<" : "esperando");
             robot.vision.addTelemetry(telemetry, now);
             robot.turret.addTelemetry(telemetry);
