@@ -47,10 +47,17 @@ import org.firstinspires.ftc.teamcode.util.FileStateStore;
  *  2. Pelota en la copa a 0, 27 y 54 mm (dpad der/izq): anota lo que lee arriba. La altura más
  *     alta en la que todavía NO la ve es FeederCfg.COPA_UPPER_BLIND_MM.
  *  3. Pelota subiendo hasta la etapa (dpad arriba): la telemetría guarda la distancia mínima.
- *  4. En modo ciclo, "Última subida" dice a cuántos mm la vio, su mínimo y cuándo pasó. Mide
- *     dónde se queda la de arriba: el centro tiene que quedar entre z 145 y z 156 (NECTAR
- *     sobre NECTAR; un poco más bajo toca la de la copa y más alto toca el flywheel).
- *     Ajusta LIFT_SEAT_POWER, LIFT_PASS_MM y LIFT_EXTRA_MM. Si no se puede, avisar al CAD.
+ *  4. Encoder del elevador (encoder 2): en modo manual, dpad arriba tiene que SUBIR las
+ *     cuentas. Mide con regla cuánto sube la superficie de las Gecko por cuenta
+ *     (ELEVATOR_MM_PER_TICK, CALC 0.69 mm).
+ *  5. PRUEBA DE BANCO DEL CAD (v146), con el flywheel APAGADO, en modo ciclo: deja que suba
+ *     una pelota y mira dónde se queda la de arriba y si se queda, BAJA o SE TREPA (la cuña de
+ *     las locas la empuja hacia arriba arriba de z 128). Con NECTAR y con POLLEN, con y sin
+ *     pelota en la copa. "Última subida" dice cómo terminó y a qué altura la deja el encoder.
+ *     Las Gecko de z 128 la sostienen hasta z 147.0 (NECTAR) y 145.4 (POLLEN); abajo no tiene
+ *     que tocar la de la copa (144.8 NECTAR sobre NECTAR, 134.4 POLLEN sobre NECTAR). Ajusta
+ *     LIFT_TARGET_Z_* (y, sin encoder, LIFT_PASS_* y LIFT_EXTRA_MM). Si se trepa o no cabe en
+ *     esa ventana, avisar al CAD.
  */
 @TeleOp(name = "Tune: Alimentador", group = "2 Calibracion")
 public class TuneFeeder extends LinearOpMode {
@@ -157,6 +164,8 @@ public class TuneFeeder extends LinearOpMode {
             telemetry.addData("V3 arriba", upper.describe());
             telemetry.addData("V3 copa", inCopa.describe());
             telemetry.addData("BB3 fila", filaBeam.isActive() ? "cortado (hay pelota)" : "libre");
+            telemetry.addData("Encoder elevador", "%d cuentas (%.1f mm de Gecko)", elevator.getCurrentPosition(),
+                    elevator.getCurrentPosition() * FeederCfg.ELEVATOR_MM_PER_TICK);
             if (cycleMode) {
                 telemetry.addData("Última subida", feeder.liftTrace().isEmpty() ? "todavía no" : feeder.liftTrace());
             } else {
