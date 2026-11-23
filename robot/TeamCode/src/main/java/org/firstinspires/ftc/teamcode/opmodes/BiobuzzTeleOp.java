@@ -20,7 +20,8 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
  *
  * LLENO (G407): por la cuenta, o con arriba, copa y fila ocupadas y otra pelota en la
  *   entrada del intake (la 4a se queda en la boca). Lleno, la lengua se queda abajo y M_F
- *   para en BRAKE.
+ *   para en BRAKE. Mientras la fila no puede recibir, una pelota en la entrada espera con
+ *   M_F en BRAKE (no es atasco).
  *
  * GAMEPAD 1 (piloto)
  *   stick izquierdo        avanzar y moverse de lado
@@ -128,7 +129,7 @@ public abstract class BiobuzzTeleOp extends LinearOpMode {
                     : intakeOn ? Intake.Command.IN : Intake.Command.STOP;
             robot.intake.setCommand(cmd);
             robot.intake.setRivalOverride(gamepad1.b);
-            robot.intake.update(now, robot.isFull(), robot.stagesFull());
+            robot.updateIntake(now);
 
             // ----- tiro -----
             robot.shooter.update(now, distanceFresh ? last.distanceIn : Double.NaN, robot.feeder.nextBall());
