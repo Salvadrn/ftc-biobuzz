@@ -35,7 +35,8 @@ public class TongueServo {
     public static final double MIN_US = 500, MAX_US = 2500, DEG_PER_US = 0.15;
 
     private final Servo servo;
-    private Position target = null;          // null = todavía a ningún lado
+    private Position target = null;          // null = todavía a ningún lado (o a mano)
+    private boolean manual = false;          // "Tune: Lengua" la está moviendo a mano
     private Phase phase = Phase.STILL;
     private double cmdUs = Double.NaN;        // lo que se le manda
     private double estUs = Double.NaN;        // dónde se cree que va
@@ -54,6 +55,7 @@ public class TongueServo {
     public void fold(long nowNs) {
         if (target == Position.FOLDED) return;
         if (Double.isNaN(estUs)) estUs = IntakeLenguaCfg.DOWN_US;
+        manual = false;
         target = Position.FOLDED;
         phase = Phase.STILL;
         command(IntakeLenguaCfg.FOLDED_US, nowNs);
@@ -63,6 +65,7 @@ public class TongueServo {
     public void deploy(long nowNs) {
         if (target == Position.DOWN) return;
         if (Double.isNaN(estUs)) estUs = IntakeLenguaCfg.FOLDED_US;   // al empezar está plegada (R102)
+        manual = false;
         target = Position.DOWN;
         phase = Phase.TO_PUSH;
         command(IntakeLenguaCfg.PUSH_US, nowNs);
@@ -72,7 +75,7 @@ public class TongueServo {
     public void update(long nowNs) {
         double dt = lastNs == 0 ? 0 : Range.clip((nowNs - lastNs) / 1e9, 0, 0.1);
         lastNs = nowNs;
-        if (target == null) return;
+        if (target == null && !manual) return;
 
         double servoStep = IntakeLenguaCfg.SERVO_DEG_S / DEG_PER_US * dt;
         estUs += Range.clip(cmdUs - estUs, -servoStep, servoStep);
@@ -90,6 +93,24 @@ public class TongueServo {
             if (servo instanceof PwmControl) ((PwmControl) servo).setPwmDisable();
             pwmOn = false;
         }
+    }
+
+    /**
+     * Solo para "Tune: Lengua": manda un pulso directo, sin secuencia. Usarlo en pasos chicos
+     * desde donde ya está: un salto grande desde plegada hacia abajo deja caer la lengua.
+     */
+    public void manual(double us, long nowNs) {
+        if (Double.isNaN(estUs)) estUs = us;
+        target = null;
+        manual = true;
+        phase = Phase.STILL;
+        command(us, nowNs);
+    }
+
+    /** Solo para "Tune: Lengua": suelta el servo (PWM apagado). */
+    public void release() {
+        if (servo instanceof PwmControl) ((PwmControl) servo).setPwmDisable();
+        pwmOn = false;
     }
 
     private void command(double us, long nowNs) {
@@ -113,7 +134,7 @@ public class TongueServo {
 
     /** A dónde se mandó (null = a ningún lado todavía). */
     public Position target() { return target; }
-    public boolean isSettled() { return target != null && isSettled(lastNs); }
+    public boolean isSettled() { return (target != null || manual) && isSettled(lastNs); }
     public boolean isPwmOn() { return pwmOn; }
     public double commandUs() { return cmdUs; }
     public double estimateUs() { return estUs; }
@@ -124,6 +145,7 @@ public class TongueServo {
     }
 
     public String describe() {
+        if (manual) return String.format("a mano (%.0f µs%s)", cmdUs, pwmOn ? "" : ", suelta");
         if (target == null) return "sin mandar";
         String what = phase == Phase.TO_PUSH ? "yendo al empuje" : phase == Phase.RAMP ? "bajando en rampa"
                 : isSettled() ? "quieta" : "moviéndose";
