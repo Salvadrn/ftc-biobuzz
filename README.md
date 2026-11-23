@@ -30,6 +30,7 @@ Base: FtcRobotController SDK **12.0**, Java. Todo el código propio vive en
 | `feeder/BallInventory.java` | Cuenta de pelotas para G407 (máximo 4). |
 | `intake/Intake.java` | Interfaz del intake: cambiar de mecanismo no rompe lo demás. |
 | `intake/IntakeLengua.java` | El intake (18-nov): lengua de bandas con dedos colgantes, desplegada por un servo. Probado solo en simulación; faltan los µs del servo (CAD). |
+| `intake/TongueServo.java` | Servo de la lengua: plegar directo; desplegar rápido hasta el empuje y luego en rampa. |
 | `intake/ThroatCounter.java` | La garganta: cuenta para G407 y rivales para G408. |
 | `sensors/` | Sensores de color REV V3 y break-beams. |
 | `opmodes/` | TeleOp rojo y azul, y los OpModes de calibración y prueba. |
@@ -98,6 +99,13 @@ solo manda comandos cuando cambia de modo; si no, se quedaría en 1500 µs arras
 
 **Cambiar el modo de un motor reenvía la última potencia.** Hay que mandar 0 antes de
 cada `setMode` (con el intake F2, un `RUN_TO_POSITION` arrancaba al 100 %).
+
+**La lengua se despliega en dos tramos** (CAD v139). De plegada al "empuje" la manivela
+gira 77° sin mover la lengua (el perno corre en la ranura de la biela), así que va rápido.
+De ahí a abajo va en rampa de 120°/s como máximo: al pasar la vertical la lengua cae por
+su peso, y si la manivela se quedara quieta serían ~35° de caída libre; con la rampa la
+alcanza sin golpe. Plegar es directo: la manivela la sube con la biela tensa y, pasada la
+vertical, la lengua se recarga sola en su tope y el servo se suelta.
 
 **La lengua del intake no se pliega sobre una pelota.** Con una pelota en la garganta,
 los dedos centrales se montan en ella y, al subir, la empujarían contra la flecha del
@@ -180,8 +188,9 @@ En la interfaz web del Limelight, pipeline **0**:
    el piso marcado.
 5. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador, ciclo completo
    (A solo dispara con el flywheel en velocidad y el hood en su lugar).
-6. **Tune: Lengua**: µs de plegada y abajo sin empujar los topes (el sentido del PWM no
-   está verificado: pasos cortos), sentido de M_F y el tiempo real del viaje (`TRAVEL_S`).
+6. **Tune: Lengua**: µs de plegada, empuje y abajo sin empujar los topes, con la misma
+   secuencia del robot (el sentido del PWM no está verificado: pasos cortos), sentido de
+   M_F y la velocidad real del servo (`SERVO_DEG_S`).
 7. IMU: con el logo del hub hacia arriba y el USB hacia atrás (`ImuCfg`). En el TeleOp,
    girar a la izquierda tiene que subir el yaw.
 8. Medir `CAMERA_HEIGHT_IN`, `CAMERA_PITCH_DEG` y las alturas de las filas de tags.
@@ -258,9 +267,9 @@ Abrir la carpeta `robot/` en Android Studio y correr `TeamCode` sobre el Control
 
 - Todos los valores MEDIR y CALIBRAR de `Config.java`.
 - Confirmar el reparto de puertos y rehacer la hoja de cableado con él.
-- Intake de la lengua (todavía no está en el CAD): faltan los µs de plegada y abajo (tandas
-  T6-T7), el tiempo real del viaje y la C270 en su lugar nuevo (T11; no calibrar la cámara
-  con la pose vieja).
+- Intake de la lengua: faltan los µs de plegada, empuje y abajo (llegan con el documento
+  del CAD v138; el CAD propone ≈1998 / 1484 / 1002, sin verificar el sentido del PWM), la
+  velocidad real del servo y calibrar la C270 en su lugar nuevo.
 - Decidido por Adrián (19-nov): con 4 pelotas la lengua se queda abajo con M_F en BRAKE, y
   la precarga es de 3 POLLEN adentro (2 en el tubo y 1 en la fila) con la 4a en la loseta
   tocando el frente; el autónomo la mete al desplegar. En el TeleOp la lengua baja con el
