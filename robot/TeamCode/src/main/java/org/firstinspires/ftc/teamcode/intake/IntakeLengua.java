@@ -2,9 +2,7 @@ package org.firstinspires.ftc.teamcode.intake;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
-import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.teamcode.Alliance;
@@ -21,7 +19,8 @@ import java.util.Random;
  * M_F mueve las bandas y los 4 dedos; un servo 2000-0025-0002 con manivela y biela
  * despliega la lengua. No hay estacionado: ni imán ni encoder.
  *
- * La lengua tiene dos posiciones y no tiene sensor: "ya llegó" = TRAVEL_S después de mandarla.
+ * La lengua tiene dos posiciones y no tiene sensor; su servo y la secuencia para plegarla y
+ * desplegarla (rápido hasta el empuje y luego en rampa) están en TongueServo.
  *  - INIT: a plegada y luego PWM apagado; se sostiene sola contra el tope de atrás (R103) y
  *    el robot queda quieto (G304.H).
  *  - Solo se pliega con la garganta LIBRE: con una pelota ahí (la 4a), los dedos centrales
@@ -37,16 +36,10 @@ import java.util.Random;
  * si estaba plegada, primero baja, con la fila quieta, y luego reversa de M_F y de la fila.
  */
 public class IntakeLengua implements Intake {
-    /** Posiciones de la lengua. */
-    public enum Tongue { FOLDED, DOWN }
-
     private enum State { IDLE, PULLING, UNJAM, BLOCKED, REJECTING, RIVAL_STUCK, EJECTING, FULL }
 
-    /** 2000-0025-0002: 500 a 2500 µs. */
-    private static final double SERVO_MIN_US = 500, SERVO_MAX_US = 2500;
-
     private final DcMotor motor;
-    private final Servo servo;
+    private final TongueServo tongue;
     private final BeamSensor mouth;
     private final ThroatCounter throat;
     private final RivalNectarDetector camera;   // puede no tener cámara
@@ -57,10 +50,6 @@ public class IntakeLengua implements Intake {
     private boolean rivalOverride = false;
     private long lastNs = 0;
 
-    // Lengua
-    private Tongue tongue = null;               // a dónde se mandó; null = todavía a ningún lado
-    private long tongueCmdNs;
-    private boolean tonguePwmOn = true;
     private boolean initDone = false;
 
     // Motor, sin mandar comandos repetidos
@@ -76,7 +65,7 @@ public class IntakeLengua implements Intake {
     public IntakeLengua(DcMotor motor, Servo servo, BeamSensor mouth, BeamSensor throatBeam,
                         BallSensor throatColor, RivalNectarDetector camera, Alliance alliance) {
         this.motor = motor;
-        this.servo = servo;
+        this.tongue = new TongueServo(servo);
         this.mouth = mouth;
         this.throat = new ThroatCounter(throatBeam, throatColor, alliance);
         this.camera = camera;
@@ -85,9 +74,6 @@ public class IntakeLengua implements Intake {
         motor.setPower(0);
         motorPower = 0;
         motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);   // el encoder ya no se usa
-        if (servo instanceof PwmControl) {
-            ((PwmControl) servo).setPwmRange(new PwmControl.PwmRange(SERVO_MIN_US, SERVO_MAX_US));
-        }
     }
 
     // ===================== INIT =====================
@@ -101,16 +87,16 @@ public class IntakeLengua implements Intake {
         lastNs = nowNs;
         setMotor(0);
         throat.update(nowNs, false, false);
-        if (tongue == null) {
+        if (tongue.target() == null) {
             if (throat.hasBall()) {
                 warning = "pelota en la garganta: sácala para plegar la lengua (R102)";
             } else {
                 warning = "";
-                moveTongue(Tongue.FOLDED, nowNs);
+                tongue.fold(nowNs);
             }
         }
-        updateTongue(nowNs);
-        initDone = tongue == Tongue.FOLDED && !tonguePwmOn;
+        tongue.update(nowNs);
+        initDone = tongue.isAt(TongueServo.Position.FOLDED) && !tongue.isPwmOn();
         return initDone;
     }
 
@@ -136,7 +122,7 @@ public class IntakeLengua implements Intake {
         lastNs = nowNs;
         throat.update(nowNs, state == State.PULLING, state == State.EJECTING);
         // Dieron Play sin pasar por INIT: plegarla, si la garganta está libre
-        if (tongue == null && !throat.hasBall()) moveTongue(Tongue.FOLDED, nowNs);
+        if (tongue.target() == null && !throat.hasBall()) tongue.fold(nowNs);
         if (throat.justCounted()) {
             unjamTries = 0;
             mouthSinceNs = -1;
@@ -150,8 +136,8 @@ public class IntakeLengua implements Intake {
 
         switch (state) {
             case REJECTING: {
-                moveTongue(Tongue.DOWN, nowNs);
-                if (!tongueAt(Tongue.DOWN, nowNs)) {     // primero abajo, con la fila quieta
+                tongue.deploy(nowNs);
+                if (!tongue.isAt(TongueServo.Position.DOWN)) {   // primero abajo, con la fila quieta
                     setMotor(0);
                     break;
                 }
@@ -197,7 +183,7 @@ public class IntakeLengua implements Intake {
             }
         }
 
-        updateTongue(nowNs);
+        tongue.update(nowNs);
         if (state != State.BLOCKED && warning.startsWith("NECTAR rival enfrente")) warning = "";
     }
 
@@ -218,8 +204,8 @@ public class IntakeLengua implements Intake {
     private void runSteady(long nowNs) {
         switch (state) {
             case PULLING:
-                moveTongue(Tongue.DOWN, nowNs);
-                if (!tongueAt(Tongue.DOWN, nowNs)) {
+                tongue.deploy(nowNs);
+                if (!tongue.isAt(TongueServo.Position.DOWN)) {
                     setMotor(0);
                     mouthSinceNs = -1;
                     break;
@@ -245,8 +231,8 @@ public class IntakeLengua implements Intake {
                 }
                 break;
             case EJECTING:
-                moveTongue(Tongue.DOWN, nowNs);
-                setMotor(tongueAt(Tongue.DOWN, nowNs) ? -IntakeLenguaCfg.IN_POWER : 0);
+                tongue.deploy(nowNs);
+                setMotor(tongue.isAt(TongueServo.Position.DOWN) ? -IntakeLenguaCfg.IN_POWER : 0);
                 break;
             case FULL:
                 setMotor(0);    // BRAKE; la lengua se queda donde está (abajo: subirla empujaría la 4a)
@@ -261,42 +247,13 @@ public class IntakeLengua implements Intake {
 
     // ===================== lengua =====================
 
-    private void moveTongue(Tongue t, long nowNs) {
-        if (t == tongue) return;
-        tongue = t;
-        tongueCmdNs = nowNs;
-        if (servo instanceof PwmControl) ((PwmControl) servo).setPwmEnable();
-        tonguePwmOn = true;
-        servo.setPosition(positionFor(t));
-    }
-
-    /** Plegada y ya llegó: se suelta (se sostiene sola por su peso). */
-    private void updateTongue(long nowNs) {
-        if (tongue == Tongue.FOLDED && tonguePwmOn && tongueAt(Tongue.FOLDED, nowNs)) {
-            if (servo instanceof PwmControl) ((PwmControl) servo).setPwmDisable();
-            tonguePwmOn = false;
-        }
-    }
-
-    private boolean tongueAt(Tongue t, long nowNs) {
-        return tongue == t && (nowNs - tongueCmdNs) / 1e9 >= IntakeLenguaCfg.TRAVEL_S;
-    }
-
-    public static double usFor(Tongue t) {
-        return t == Tongue.DOWN ? IntakeLenguaCfg.DOWN_US : IntakeLenguaCfg.FOLDED_US;
-    }
-
-    public static double positionFor(Tongue t) {
-        return Range.clip((usFor(t) - SERVO_MIN_US) / (SERVO_MAX_US - SERVO_MIN_US), 0, 1);
-    }
-
     /** A dónde se mandó la lengua (null = a ningún lado todavía). */
-    public Tongue getTongue() { return tongue; }
+    public TongueServo.Position getTongue() { return tongue.target(); }
 
-    /** La lengua ya tuvo tiempo de llegar a donde se mandó. */
-    public boolean isTongueSettled() { return tongue != null && tongueAt(tongue, lastNs); }
+    /** La lengua ya llegó a donde se mandó y está quieta. */
+    public boolean isTongueSettled() { return tongue.isSettled(); }
 
-    public boolean isTonguePwmOn() { return tonguePwmOn; }
+    public boolean isTonguePwmOn() { return tongue.isPwmOn(); }
 
     // ===================== motor y estado =====================
 
@@ -314,13 +271,13 @@ public class IntakeLengua implements Intake {
 
     @Override
     public boolean isFeeding() {
-        return (state == State.PULLING || state == State.UNJAM) && tongueAt(Tongue.DOWN, lastNs);
+        return (state == State.PULLING || state == State.UNJAM) && tongue.isAt(TongueServo.Position.DOWN);
     }
 
     @Override
     public boolean wantsFilaReverse() {
         return (state == State.REJECTING && rejectStartNs >= 0)
-                || (state == State.EJECTING && throat.rivalPending() && tongueAt(Tongue.DOWN, lastNs));
+                || (state == State.EJECTING && throat.rivalPending() && tongue.isAt(TongueServo.Position.DOWN));
     }
 
     @Override
@@ -361,8 +318,8 @@ public class IntakeLengua implements Intake {
 
     @Override
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addData("Intake lengua", "%s  lengua %s%s  boca %s  garganta %s  color %s",
-                state, tongue, isTongueSettled() ? "" : " (moviéndose)",
+        telemetry.addData("Intake lengua", "%s  lengua %s  boca %s  garganta %s  color %s",
+                state, tongue.describe(),
                 mouth.isActive() ? "sí" : "no", throat.hasBall() ? "sí" : "no",
                 throat.colorFault() ? "SIN LECTURA" : throat.colorLast());
         if (camera != null) telemetry.addData("  cámara", camera.describe());
