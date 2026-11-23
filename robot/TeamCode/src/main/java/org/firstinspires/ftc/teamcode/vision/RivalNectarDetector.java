@@ -16,8 +16,11 @@ import org.firstinspires.ftc.vision.opencv.ImageRegion;
 import java.util.List;
 
 /**
- * Cámara Logitech C270 sobre la visera del intake (USB 2.0 de la Control Hub; R708.A la
- * permite). Busca NECTAR del color rival frente al intake para no jalarla (G408).
+ * Cámara Logitech C270 en la esquina +X del intake (CAD v116-v127; la visera salió con F2 en
+ * la v106), en el USB 2.0 de la Control Hub (R708.A la permite). Busca NECTAR del color
+ * rival frente al intake para no jalarla (G408). Su pose del CAD es provisional (ver
+ * Config.IntakeCameraCfg): con la mitad de abajo de la imagen, cerca del robot solo cubre
+ * la mitad +X de la boca. El respaldo es el V3 de la garganta.
  *
  * Usa el ColorBlobLocatorProcessor del SDK con filtros de área y redondez: una NECTAR
  * cerca del robot es un círculo grande en la mitad de abajo de la imagen; las cintas del
