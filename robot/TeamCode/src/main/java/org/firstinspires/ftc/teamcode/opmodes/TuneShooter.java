@@ -111,7 +111,7 @@ public class TuneShooter extends LinearOpMode {
 
                 // Intake quieto: M_F parado y la lengua donde esté
                 robot.intake.setCommand(Intake.Command.STOP);
-                robot.intake.update(now, robot.isFull(), robot.stagesFull());
+                robot.updateIntake(now);
 
                 CellTarget last = robot.vision.getLastTarget();
                 double age = robot.vision.secondsSinceTarget(now);
