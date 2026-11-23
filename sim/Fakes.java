@@ -36,6 +36,9 @@ final class Fakes {
         boolean targetSetBeforeRunToPosition = true;
         double overshoot = 0;                        // cuentas de sobrepaso en RUN_TO_POSITION
         int overshotTarget = Integer.MIN_VALUE;
+        double currentAlertA = Double.NaN;           // setCurrentAlert
+        boolean overCurrent = false;                 // lo que reporta isOverCurrent (lo pone la prueba)
+        double currentA = 0;
 
         DcMotorEx proxy() {
             return (DcMotorEx) Proxy.newProxyInstance(Fakes.class.getClassLoader(), new Class[]{DcMotorEx.class},
@@ -58,6 +61,10 @@ final class Fakes {
                             case "isBusy": return Math.abs(pos - target) > tolerance;
                             case "setZeroPowerBehavior": zpb = (DcMotor.ZeroPowerBehavior) a[0]; return null;
                             case "getZeroPowerBehavior": return zpb;
+                            case "setCurrentAlert": currentAlertA = (Double) a[0]; return null;
+                            case "getCurrentAlert": return currentAlertA;
+                            case "isOverCurrent": return overCurrent;
+                            case "getCurrent": return currentA;
                             case "toString": return "FakeMotor";
                             case "hashCode": return System.identityHashCode(p);
                             case "equals": return p == a[0];
