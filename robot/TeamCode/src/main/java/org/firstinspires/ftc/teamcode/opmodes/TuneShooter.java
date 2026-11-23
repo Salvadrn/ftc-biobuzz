@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.Alliance;
 import org.firstinspires.ftc.teamcode.BallType;
+import org.firstinspires.ftc.teamcode.Config.FlywheelCfg;
 import org.firstinspires.ftc.teamcode.Config.HoodCfg;
 import org.firstinspires.ftc.teamcode.Config.ShotCfg;
 import org.firstinspires.ftc.teamcode.Config.VisionCfg;
@@ -30,6 +31,10 @@ import org.firstinspires.ftc.teamcode.vision.CellTarget;
  *  3. Ajusta rpm y δ hasta que la pelota entre limpia varias veces seguidas. Anota la FILA
  *     en la tabla de esa pelota (el gap lo decide el V3 de arriba, no tú).
  *  4. Cinco o seis distancias por tipo de pelota, de la más cercana a la más lejana.
+ *  5. SHOT_DIP_RPM: anota la "caída del último tiro" con POLLEN y con NECTAR a varias rpm.
+ *     CALC: 60-100 rpm con POLLEN y 120-190 con NECTAR, como mínimo; con 250 puede que
+ *     ningún tiro se confirme. Pon SHOT_DIP_RPM abajo de la caída más chica medida.
+ * Todo con la aleta de entrada de la v145 armada (la de la v133-v139 apretaba más que el hood).
  *
  * CONTROLES
  *   En INIT: X = azul, B = roja, A = arrancar con esa alianza
@@ -96,14 +101,17 @@ public class TuneShooter extends LinearOpMode {
                 boolean ready = robot.flywheel.isAtSpeed() && robot.hood.isReady(now)
                         && robot.feeder.hasUpperBall() && !robot.feeder.isBusy()
                         && (!autoAim || robot.turret.isLocked(now));
-                if (fireDown && !fireWasDown && ready) robot.feeder.requestShot();
+                if (fireDown && !fireWasDown && ready) {
+                    robot.flywheel.resetMaxDrop();
+                    robot.feeder.requestShot();
+                }
                 fireWasDown = fireDown;
                 robot.feeder.update(now, false, false, false, robot.flywheel.consumeShotDip(),
                         robot.flywheel.isEnabled());
 
                 // Intake quieto: M_F parado y la lengua donde esté
                 robot.intake.setCommand(Intake.Command.STOP);
-                robot.intake.update(now, robot.inventory.isFull());
+                robot.intake.update(now, robot.isFull(), robot.stagesFull());
 
                 CellTarget last = robot.vision.getLastTarget();
                 double age = robot.vision.secondsSinceTarget(now);
@@ -123,6 +131,8 @@ public class TuneShooter extends LinearOpMode {
                     telemetry.addData("FILA para " + table, "{ %.0f, %.0f, %.1f },", dist, rpm, delta);
                 }
                 telemetry.addData("Listo", ready ? "SÍ (gatillo derecho)" : "no");
+                telemetry.addData("Caída del último tiro", "%.0f rpm  (SHOT_DIP_RPM %.0f)",
+                        robot.flywheel.getMaxDropRpm(), FlywheelCfg.SHOT_DIP_RPM);
                 telemetry.addLine();
                 robot.vision.addTelemetry(telemetry, now);
                 robot.turret.addTelemetry(telemetry);
