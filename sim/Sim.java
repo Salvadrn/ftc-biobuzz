@@ -14,6 +14,7 @@ import org.firstinspires.ftc.teamcode.Config.VisionCfg;
 import org.firstinspires.ftc.teamcode.feeder.Feeder;
 import org.firstinspires.ftc.teamcode.intake.Intake;
 import org.firstinspires.ftc.teamcode.intake.IntakeLengua;
+import org.firstinspires.ftc.teamcode.intake.TongueServo;
 import org.firstinspires.ftc.teamcode.sensors.BallSensor;
 import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
 import org.firstinspires.ftc.teamcode.subsystems.Flywheel;
@@ -909,7 +910,7 @@ public class Sim {
     /** Lo deja jalando (la lengua baja). Regresa el reloj. */
     static long warmUp(Intake in, long now) {
         in.setCommand(Intake.Command.IN);
-        for (int i = 0; i < 80; i++) { now += 10 * MS; in.update(now, false); }
+        for (int i = 0; i < 150; i++) { now += 10 * MS; in.update(now, false); }
         in.consumeEntered();
         in.consumeRejected();
         return now;
@@ -1054,82 +1055,12 @@ public class Sim {
 
     /** Posiciones de prueba (las reales las da el CAD): con las de Config el servo no se mueve. */
     /** Posiciones de prueba (las reales las da el CAD): con las de Config el servo no se mueve. */
-    static double[] setTestTonguePositions() {
-        double[] saved = {IntakeLenguaCfg.FOLDED_US, IntakeLenguaCfg.DOWN_US};
-        IntakeLenguaCfg.FOLDED_US = 1000;
-        IntakeLenguaCfg.DOWN_US = 2000;
-        return saved;
-    }
-
-    static void restoreTonguePositions(double[] saved) {
-        IntakeLenguaCfg.FOLDED_US = saved[0];
-        IntakeLenguaCfg.DOWN_US = saved[1];
-    }
 
     static IntakeLengua lengua(Fakes.Motor m, Fakes.PosServo sv, boolean[] throatBeam, BallType[] seen) {
         return new IntakeLengua(m.proxy(), sv.proxy(), new BeamSensor(Fakes.digital(() -> false), true),
                 new BeamSensor(Fakes.digital(() -> throatBeam[0]), true),
                 new BallSensor(out -> { fill(out, seen[0], 9); return true; }, SensorCfg.THROAT, 0.0),
                 null, Alliance.RED);
-    }
-
-    static void testLenguaTongue() {
-        double[] saved = setTestTonguePositions();
-        try {
-            Fakes.Motor m = new Fakes.Motor();
-            Fakes.PosServo sv = new Fakes.PosServo();
-            boolean[] beam = {false};
-            IntakeLengua in = lengua(m, sv, beam, new BallType[]{BallType.NONE});
-            double travel = IntakeLenguaCfg.TRAVEL_S;
-            long now = 0;
-            double readyAt = -1;
-            for (int i = 1; i <= 100; i++) {
-                now += 10 * MS;
-                if (in.initStep(now) && readyAt < 0) readyAt = i * 0.01;
-            }
-            check("lengua: en INIT va a plegada y luego se suelta (PWM apagado)", in.isStartReady() && !sv.pwmOn
-                    && near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.FOLDED)) && m.power == 0
-                    && Math.abs(readyAt - travel) <= 0.02, String.format("lista a %.2f s (viaje %.2f s)", readyAt, travel));
-
-            in.setCommand(Intake.Command.IN);         // Play con 4 pelotas e intake prendido
-            for (int i = 0; i < 100; i++) { now += 10 * MS; in.update(now, true); }
-            check("lengua: al dar Play con 4 pelotas se queda plegada y suelta",
-                    in.getTongue() == IntakeLengua.Tongue.FOLDED && !sv.pwmOn && m.power == 0, "" + in.getTongue());
-
-            double pullAt = -1;                       // ya hay lugar: baja y luego jala
-            for (int i = 1; i <= 100; i++) {
-                now += 10 * MS;
-                in.update(now, false);
-                if (m.power > 0 && pullAt < 0) pullAt = i * 0.01;
-            }
-            check("lengua: con lugar e intake prendido baja, y M_F jala hasta que llegó",
-                    in.getTongue() == IntakeLengua.Tongue.DOWN && sv.pwmOn
-                            && near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.DOWN))
-                            && Math.abs(pullAt - travel) <= 0.02, String.format("jala a %.2f s", pullAt));
-            check("lengua: jalando, la fila puede traer la siguiente", in.isFeeding(), "");
-
-            beam[0] = true;                           // llega la 4a y se queda en la garganta
-            boolean moved = false;
-            for (int i = 0; i < 200; i++) {
-                now += 10 * MS;
-                in.update(now, true);
-                if (in.getTongue() != IntakeLengua.Tongue.DOWN
-                        || !near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.DOWN))) moved = true;
-            }
-            check("lengua: con 4 pelotas se queda ABAJO y M_F para en BRAKE (no empuja la 4a)", !moved && sv.pwmOn
-                    && m.power == 0 && m.zpb == DcMotor.ZeroPowerBehavior.BRAKE, "" + in.getTongue());
-
-            beam[0] = false;                          // salió un tiro
-            in.setCommand(Intake.Command.STOP);
-            for (int i = 0; i < 50; i++) { now += 10 * MS; in.update(now, false); }
-            check("lengua: con lugar pero intake apagado se queda abajo y quieta",
-                    in.getTongue() == IntakeLengua.Tongue.DOWN && m.power == 0, "" + in.getTongue());
-            in.setCommand(Intake.Command.IN);
-            for (int i = 0; i < 20; i++) { now += 10 * MS; in.update(now, false); }
-            check("lengua: al prender el intake jala de inmediato (ya está abajo)", m.power > 0, "");
-        } finally {
-            restoreTonguePositions(saved);
-        }
     }
 
     static void testLenguaInitBallInThroat() {
@@ -1146,7 +1077,100 @@ public class Sim {
             beam[0] = false;                          // la sacan
             for (int i = 0; i < 100; i++) { now += 10 * MS; in.initStep(now); }
             check("lengua: ya sin pelota, se pliega y queda lista", in.isStartReady() && !sv.pwmOn
-                    && near(sv.position, IntakeLengua.positionFor(IntakeLengua.Tongue.FOLDED)), "");
+                    && near(sv.position, TongueServo.positionFor(IntakeLenguaCfg.FOLDED_US)), "");
+        } finally {
+            restoreTonguePositions(saved);
+        }
+    }
+    /** Posiciones de prueba (las del CAD v139, sin verificar): con las de Config el servo no se mueve. */
+    static double[] setTestTonguePositions() {
+        double[] saved = {IntakeLenguaCfg.FOLDED_US, IntakeLenguaCfg.PUSH_US, IntakeLenguaCfg.DOWN_US};
+        IntakeLenguaCfg.FOLDED_US = 1998;
+        IntakeLenguaCfg.PUSH_US = 1484;
+        IntakeLenguaCfg.DOWN_US = 1002;
+        return saved;
+    }
+
+    static void restoreTonguePositions(double[] saved) {
+        IntakeLenguaCfg.FOLDED_US = saved[0];
+        IntakeLenguaCfg.PUSH_US = saved[1];
+        IntakeLenguaCfg.DOWN_US = saved[2];
+    }
+
+    /** Tiempo que el modelo tarda en desplegar desde plegada: al empuje, rampa y asentarse. */
+    static double deployTimeS() {
+        double servoUsS = IntakeLenguaCfg.SERVO_DEG_S / TongueServo.DEG_PER_US;
+        double rampUsS = IntakeLenguaCfg.DEPLOY_RAMP_DEG_S / TongueServo.DEG_PER_US;
+        return Math.abs(IntakeLenguaCfg.FOLDED_US - IntakeLenguaCfg.PUSH_US) / servoUsS
+                + Math.abs(IntakeLenguaCfg.PUSH_US - IntakeLenguaCfg.DOWN_US) / rampUsS + IntakeLenguaCfg.SETTLE_S;
+    }
+
+    static void testLenguaTongue() {
+        double[] saved = setTestTonguePositions();
+        try {
+            Fakes.Motor m = new Fakes.Motor();
+            Fakes.PosServo sv = new Fakes.PosServo();
+            boolean[] beam = {false};
+            IntakeLengua in = lengua(m, sv, beam, new BallType[]{BallType.NONE});
+            double servoUsS = IntakeLenguaCfg.SERVO_DEG_S / TongueServo.DEG_PER_US;
+            double foldS = Math.abs(IntakeLenguaCfg.DOWN_US - IntakeLenguaCfg.FOLDED_US) / servoUsS + IntakeLenguaCfg.SETTLE_S;
+            long now = 0;
+            double readyAt = -1;
+            for (int i = 1; i <= 150; i++) {
+                now += 10 * MS;
+                if (in.initStep(now) && readyAt < 0) readyAt = i * 0.01;
+            }
+            check("lengua: en INIT va directo a plegada y luego se suelta (PWM apagado)", in.isStartReady() && !sv.pwmOn
+                    && near(sv.position, TongueServo.positionFor(IntakeLenguaCfg.FOLDED_US)) && m.power == 0
+                    && Math.abs(readyAt - foldS) <= 0.03, String.format("lista a %.2f s (modelo %.2f s)", readyAt, foldS));
+
+            in.setCommand(Intake.Command.IN);         // Play con 4 pelotas e intake prendido
+            for (int i = 0; i < 100; i++) { now += 10 * MS; in.update(now, true); }
+            check("lengua: al dar Play con 4 pelotas se queda plegada y suelta",
+                    in.getTongue() == TongueServo.Position.FOLDED && !sv.pwmOn && m.power == 0, "" + in.getTongue());
+
+            // Ya hay lugar: despliega (salto al empuje, rampa hasta abajo) y solo entonces jala
+            double pullAt = -1, prevPos = sv.position, worstRampUsS = 0;
+            boolean firstIsPush = false, sawPush = false, pulledEarly = false;
+            for (int i = 1; i <= 200; i++) {
+                now += 10 * MS;
+                in.update(now, false);
+                if (i == 1) firstIsPush = near(sv.position, TongueServo.positionFor(IntakeLenguaCfg.PUSH_US));
+                double us = TongueServo.MIN_US + sv.position * (TongueServo.MAX_US - TongueServo.MIN_US);
+                if (sawPush) worstRampUsS = Math.max(worstRampUsS, Math.abs(sv.position - prevPos) * 2000 / 0.01);
+                if (Math.abs(us - IntakeLenguaCfg.PUSH_US) < 0.5 || (sawPush && us != IntakeLenguaCfg.PUSH_US)) sawPush = true;
+                prevPos = sv.position;
+                if (m.power > 0 && pullAt < 0) pullAt = i * 0.01;
+                if (m.power > 0 && !in.isTongueSettled()) pulledEarly = true;
+            }
+            double deployS = deployTimeS();
+            check("lengua: al desplegar, primero salta al empuje", firstIsPush, "");
+            check("lengua: de empuje a abajo, rampa de 120°/s como máximo (800 µs/s)", worstRampUsS <= 800 + 1,
+                    String.format("peor %.0f µs/s", worstRampUsS));
+            check("lengua: M_F jala hasta que la lengua llegó abajo", !pulledEarly && in.getTongue() == TongueServo.Position.DOWN
+                    && sv.pwmOn && near(sv.position, TongueServo.positionFor(IntakeLenguaCfg.DOWN_US))
+                    && Math.abs(pullAt - deployS) <= 0.03, String.format("jala a %.2f s (modelo %.2f s)", pullAt, deployS));
+            check("lengua: jalando, la fila puede traer la siguiente", in.isFeeding(), "");
+
+            beam[0] = true;                           // llega la 4a y se queda en la garganta
+            boolean moved = false;
+            for (int i = 0; i < 200; i++) {
+                now += 10 * MS;
+                in.update(now, true);
+                if (in.getTongue() != TongueServo.Position.DOWN
+                        || !near(sv.position, TongueServo.positionFor(IntakeLenguaCfg.DOWN_US))) moved = true;
+            }
+            check("lengua: con 4 pelotas se queda ABAJO y M_F para en BRAKE (no empuja la 4a)", !moved && sv.pwmOn
+                    && m.power == 0 && m.zpb == DcMotor.ZeroPowerBehavior.BRAKE, "" + in.getTongue());
+
+            beam[0] = false;                          // salió un tiro
+            in.setCommand(Intake.Command.STOP);
+            for (int i = 0; i < 50; i++) { now += 10 * MS; in.update(now, false); }
+            check("lengua: con lugar pero intake apagado se queda abajo y quieta",
+                    in.getTongue() == TongueServo.Position.DOWN && m.power == 0, "" + in.getTongue());
+            in.setCommand(Intake.Command.IN);
+            for (int i = 0; i < 20; i++) { now += 10 * MS; in.update(now, false); }
+            check("lengua: al prender el intake jala de inmediato (ya está abajo)", m.power > 0, "");
         } finally {
             restoreTonguePositions(saved);
         }
@@ -1160,22 +1184,23 @@ public class Sim {
             Fakes.PosServo sv = new Fakes.PosServo();
             IntakeLengua in = lengua(m, sv, new boolean[]{false}, seen);
             long now = 0;
-            for (int i = 0; i < 100; i++) { now += 10 * MS; in.initStep(now); }
+            for (int i = 0; i < 150; i++) { now += 10 * MS; in.initStep(now); }
             in.setCommand(Intake.Command.IN);
             for (int i = 0; i < 20; i++) { now += 10 * MS; in.update(now, true); }   // lleno: sigue plegada
             seen[0] = BallType.NECTAR_BLUE;           // una rival en la garganta con la lengua plegada
             boolean badWhileMoving = false;
             double reverseAt = -1;
-            for (int i = 1; i <= 120; i++) {
+            for (int i = 1; i <= 200; i++) {
                 now += 10 * MS;
                 in.update(now, true);
-                boolean down = in.getTongue() == IntakeLengua.Tongue.DOWN && in.isTongueSettled();
+                boolean down = in.getTongue() == TongueServo.Position.DOWN && in.isTongueSettled();
                 if (!down && (m.power != 0 || in.wantsFilaReverse() || !in.holdsFila())) badWhileMoving = true;
                 if (m.power < 0 && in.wantsFilaReverse() && reverseAt < 0) reverseAt = i * 0.01;
             }
+            double deployS = deployTimeS();
             check("lengua: rival con la lengua plegada -> primero baja, con M_F y la fila quietos", !badWhileMoving, "");
-            check("lengua: ya abajo, reversa de M_F y de la fila",
-                    Math.abs(reverseAt - IntakeLenguaCfg.TRAVEL_S) <= 0.02, String.format("reversa a %.2f s", reverseAt));
+            check("lengua: ya abajo, reversa de M_F y de la fila", Math.abs(reverseAt - deployS) <= 0.03,
+                    String.format("reversa a %.2f s (modelo %.2f s)", reverseAt, deployS));
         } finally {
             restoreTonguePositions(saved);
         }
