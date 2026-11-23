@@ -8,9 +8,10 @@ import org.firstinspires.ftc.teamcode.BallType;
  * Java puro, sin nada del SDK, para poder probarlo en la computadora.
  *
  * Primero decide si hay pelota con la distancia del sensor; luego el color con el
- * matiz (hue). Si el color no alcanza, usa la distancia como pista de tamaño: en el
- * tubo la NECTAR queda pegada a la ventana y la POLLEN más lejos (CAD: 4.6 mm contra
- * 16.1 mm en la copa).
+ * matiz (hue). Si el color no alcanza, usa la distancia como pista de tamaño: en la copa
+ * la NECTAR queda pegada a la ventana y la POLLEN más lejos (CALC, CAD v131: 4.5 mm contra
+ * 16.2 mm). En la garganta no sirve (NECTAR de 8.3 a 14.1 mm y POLLEN de 6.3 a 33.1 según
+ * el lado de la fila): ahí nectarMaxMm va en NaN y solo cuenta el color.
  */
 public final class ColorClassifier {
 
