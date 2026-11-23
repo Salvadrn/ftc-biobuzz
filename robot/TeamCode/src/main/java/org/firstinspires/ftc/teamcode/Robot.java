@@ -33,7 +33,7 @@ import org.firstinspires.ftc.teamcode.vision.RivalNectarDetector;
 import java.util.List;
 
 /**
- * Todo el hardware del robot del CAD v99 en un solo lugar.
+ * Todo el hardware del robot del CAD (v99 a v145) en un solo lugar.
  *
  * 7 de 8 motores (4 de tracción, flywheel, M_F del intake y elevador) y 6 de 8 servos
  * (torreta, gap y ángulo del hood, fila, copa y lengua del intake), como cuenta R503.
@@ -89,7 +89,8 @@ public class Robot {
                 hardwareMap.get(CRServo.class, Names.FILA_SERVO),
                 hardwareMap.get(Servo.class, Names.COPA_SERVO),
                 hardwareMap.get(DcMotor.class, Names.ELEVATOR),
-                colorSensor(hardwareMap, Names.COLOR_UPPER, SensorCfg.UPPER),
+                new BallSensor(new RevColorReader(hardwareMap, Names.COLOR_UPPER, SensorCfg.COLOR_GAIN,
+                        SensorCfg.UPPER_FAST_PROXIMITY), SensorCfg.UPPER, SensorCfg.COLOR_MIN_INTERVAL_S),
                 colorSensor(hardwareMap, Names.COLOR_COPA, SensorCfg.COPA),
                 new BeamSensor(hardwareMap, Names.BEAM_FILA, SensorCfg.BEAM_ACTIVE_HIGH));
         feeder.initHardware(System.nanoTime());
@@ -162,12 +163,36 @@ public class Robot {
         return continuousYawDeg;
     }
 
-    /** Cuenta de pelotas (G407): entradas, rechazos y tiros. Llamar una vez por ciclo. */
+    /**
+     * Cuenta de pelotas (G407): entradas en la garganta, rechazos y tiros. Llamar una vez por
+     * ciclo. El mínimo seguro son las 3 etapas del alimentador; una pelota en la entrada del
+     * intake no entra al mínimo: se cuenta al cruzar la garganta (si se sumara antes, al cruzar
+     * se contaría otra vez). Para "lleno" sí cuenta: ver isFull().
+     */
     public void updateInventory() {
         for (int i = intake.consumeEntered(); i > 0; i--) inventory.entered();
         for (int i = intake.consumeRejected(); i > 0; i--) inventory.left();
         for (int i = feeder.consumeShots(); i > 0; i--) inventory.left();
-        inventory.reconcile(feeder.sensedBalls() + (intake.hasBallAtThroat() ? 1 : 0));
+        inventory.reconcile(feeder.sensedBalls());
+    }
+
+    /** Arriba, copa y fila tienen pelota (o un sensor sin lectura). */
+    public boolean stagesFull() {
+        return feeder.sensedBalls() >= BallInventory.MAX_BALLS - 1;
+    }
+
+    /**
+     * G407: 4 pelotas. Por la cuenta, o con las 3 etapas ocupadas y otra pelota esperando en
+     * la entrada del intake (con la lengua, la 4a se queda en la boca sin cortar la garganta;
+     * documento del CAD v138, 4.5).
+     */
+    public boolean isFull() {
+        return inventory.isFull(feeder.sensedBalls(), intake.hasBallAtEntry());
+    }
+
+    /** La 4a está en la entrada sin contarse todavía (telemetría: "+1 en la entrada"). */
+    public boolean fourthAtEntry() {
+        return inventory.fourthWaiting(feeder.sensedBalls(), intake.hasBallAtEntry());
     }
 
     public boolean hasImu() { return imu != null; }
