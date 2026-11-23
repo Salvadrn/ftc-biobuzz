@@ -31,15 +31,16 @@ public interface Intake {
 
     /**
      * Llamar una vez por ciclo.
-     * @param robotFull  ya hay 4 pelotas (G407): no jalar más
-     * @param stagesFull las 3 etapas del alimentador (arriba, copa, fila) están ocupadas: una
-     *                   pelota en la entrada es la 4a, no un atasco
+     * @param robotFull     ya hay 4 pelotas (G407): no jalar más
+     * @param filaAccepting la fila está jalando hacia adentro: si no (ocupada, o la copa
+     *                      ocupada o moviéndose), una pelota en la entrada ESPERA, no está
+     *                      atorada (documento del CAD v138, 4.5)
      */
-    void update(long nowNs, boolean robotFull, boolean stagesFull);
+    void update(long nowNs, boolean robotFull, boolean filaAccepting);
 
-    /** Sin saber cómo va el alimentador (pruebas). */
+    /** Sin saber cómo va el alimentador (pruebas): como si la fila siempre jalara. */
     default void update(long nowNs, boolean robotFull) {
-        update(nowNs, robotFull, false);
+        update(nowNs, robotFull, true);
     }
 
     /** Está metiendo pelotas: el alimentador puede jalar la siguiente a la fila. */
