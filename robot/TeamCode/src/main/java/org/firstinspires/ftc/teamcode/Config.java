@@ -371,8 +371,41 @@ public final class Config {
         public static double COPA_SEATED_S = 0.15;
         public static double COPA_MOVE_TIMEOUT_S = 1.5;
 
-        /** CAD: motor 5203-2402-0005 (1150 rpm), 1:1 a las dos flechas de la columna. */
+        /**
+         * CAD: motor 5203-2402-0005 (1150 rpm), 1:1 a las dos flechas de la columna. Siempre en
+         * BRAKE, nunca FLOAT: con una pelota arriba de z 128, la cuña de las locas con resorte la
+         * empuja hacia arriba (CAD v146) y lo único que la sostiene es la fricción de las Gecko.
+         */
         public static boolean ELEVATOR_REVERSED = false;   // CALIBRAR: + tiene que subir
+        /**
+         * CALC → MEDIR: mm que avanza la superficie de las Gecko de 32 mm (100.5 mm por vuelta)
+         * por cuenta del encoder del elevador (145.1 cuentas por vuelta de salida, 1:1). El
+         * encoder va a la Expansion Hub, encoder 2 (CAD v146: cable 3801-0709-0600).
+         */
+        public static double ELEVATOR_MM_PER_TICK = 100.5 / 145.1;
+        /** CALC: centro de la pelota con la copa arriba (54 mm), de donde arranca la subida. */
+        public static double LIFT_START_Z_NECTAR = 106.9;
+        public static double LIFT_START_Z_POLLEN = 94.9;
+
+        /*
+         * Fin de LIFT con el ENCODER del elevador (CAD v146): las Gecko de z 128 sostienen la de
+         * arriba solo hasta z 147.0 (NECTAR) y 145.4 (POLLEN); más arriba la cuña de las locas
+         * con resorte la puede empujar hacia el flywheel. Abajo no puede tocar la de la copa:
+         * 144.8 (NECTAR sobre NECTAR) o 134.4 (POLLEN sobre NECTAR). Con NECTAR son 2.2 mm, y
+         * con el V3 el final se reparte ±3 mm con el ruido: se para por recorrido desde la copa
+         * arriba, y el V3 solo confirma que la vio. Si el encoder no cuenta (sin cable), se
+         * avisa y se termina con el V3 (LIFT_PASS_*, LIFT_EXTRA_MM).
+         */
+        public static boolean LIFT_BY_ENCODER = true;
+        /** CALC → CALIBRAR con la prueba de banco: altura del centro a la que se detiene. */
+        public static double LIFT_TARGET_Z_NECTAR = 145.9;
+        public static double LIFT_TARGET_Z_POLLEN = 140.0;
+        /** Los últimos mm antes de la meta, despacio (CALIBRAR: que el elevador no se trabe). */
+        public static double LIFT_SLOW_ZONE_MM = 8;
+        public static double LIFT_FINAL_POWER = 0.06;
+        /** Con ~15 mm de subida estimada el encoder tiene que llevar al menos esto (si no, no está). */
+        public static double ENCODER_CHECK_MM = 15;
+        public static int ENCODER_MIN_TICKS = 5;
         public static double ELEVATOR_FIRE_POWER = 0.8;
         /** Las Gecko de 32 mm van a ~1.9 m/s a toda potencia: baja para acomodar arriba. */
         public static double ELEVATOR_STAGE_POWER = 0.25;
@@ -400,8 +433,14 @@ public final class Config {
         public static double LIFT_SEAT_POWER = 0.10;
         /** CALC sin carga: 1150 rpm x 0.10 en Gecko de 32 mm ≈ 190 mm/s. MEDIR con pelota. */
         public static double LIFT_SEAT_MM_S = 190;
-        /** CALIBRAR: subida sobre el mínimo que dice que el centro ya pasó el lente (CALC: con 1 mm, ~10 mm arriba). */
+        /**
+         * CALIBRAR: subida sobre el mínimo que dice que el centro ya pasó el lente (CALC: con
+         * 1 mm, ~10 mm arriba; con 0.5, ~7). La POLLEN la nota antes: las Gecko de z 128 la
+         * sostienen hasta z 145.4 (NECTAR hasta 147.0) y abajo tiene margen (134.4 sobre una
+         * NECTAR, 112 sobre una POLLEN). Una de color desconocido usa el de NECTAR.
+         */
         public static double LIFT_PASS_MM = 1.0;
+        public static double LIFT_PASS_POLLEN_MM = 0.5;
         /**
          * CALIBRAR contra el ruido del V3: la distancia se promedia en las últimas
          * LIFT_AVG_SAMPLES lecturas viéndola, y el promedio tiene que estar arriba de su mínimo
@@ -416,11 +455,14 @@ public final class Config {
          */
         public static double LIFT_LOST_S = 0.1;
         /**
-         * CALC → CALIBRAR. Se cuenta desde que se nota la subida, no desde z 128: el documento
-         * del CAD pide ~17 mm desde el lente (hasta z ~145) y la subida se nota ~10 mm arriba,
-         * más el promedio y la confirmación (~6 mm más).
+         * CALIBRAR con la prueba de banco (README). Se cuenta desde que se nota la subida, no
+         * desde z 128: la subida se nota ~10 mm arriba del lente, más el promedio y la
+         * confirmación (~6 mm más), y eso ya deja la NECTAR en z ~147 (simulación). En 0, lo más
+         * abajo que permite esta lógica (pedido del CAD, v146): arriba de z 147.0 (NECTAR) y
+         * 145.4 (POLLEN) las Gecko de z 128 ya no tocan la pelota y la cuña de las locas la puede
+         * empujar hacia el flywheel.
          */
-        public static double LIFT_EXTRA_MM = 2;
+        public static double LIFT_EXTRA_MM = 0;
         /**
          * CALC: tope de recorrido de la subida, desde la copa arriba, por si la distancia nunca
          * marca bien su mínimo. Del centro con la copa arriba (z 106.9 NECTAR, 94.9 POLLEN) al
