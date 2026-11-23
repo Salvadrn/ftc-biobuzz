@@ -387,20 +387,32 @@ public final class Config {
         public static double IN_POWER = 1.0;
 
         /**
-         * PENDIENTE del CAD: los µs salen cuando el servo esté modelado (el sentido del PWM
-         * todavía no está verificado). Mientras, las dos posiciones valen lo mismo y el servo no
-         * se mueve. 0.15°/µs; 1500 µs = centro.
+         * PENDIENTE: los µs llegan con el documento del CAD v138 (el sentido del PWM todavía no
+         * está verificado). Mientras, las tres posiciones valen lo mismo y el servo no se mueve.
+         * 0.15°/µs; 1500 µs = centro.
          *  - Plegada (inicio): recargada por su peso en el tope de atrás; PWM apagado.
+         *  - Empuje: de plegada a aquí la lengua no se mueve (el perno corre en la ranura de la
+         *    biela); desde aquí la biela empieza a empujarla.
          *  - Abajo: en el tope duro de abajo; PWM prendido (por ahora, CAD).
          * Con 4 pelotas (G407) se queda ABAJO con M_F en BRAKE: subirla empujaría la 4a contra
-         * la flecha del pivote de la fila (CAD v106; falta que Adrián lo confirme).
+         * la flecha del pivote de la fila (CAD v106; Adrián lo confirmó el 19-nov).
          */
         public static double FOLDED_US = 1500;
+        public static double PUSH_US = 1500;
         public static double DOWN_US = 1500;
         /**
-         * El servo no dice dónde está: "ya llegó" = este tiempo después de mandarla. CAD: 0.25 s
-         * por 60° sin carga y la carga es chica; ~0.6 s un viaje completo. CONFIRMAR con el ángulo.
+         * Velocidad que se SUPONE del servo para decir "ya llegó" (no da su posición). CAD: 0.25 s
+         * por 60° sin carga (240°/s) y la carga es chica; aquí, pesimista. MEDIR.
          */
+        public static double SERVO_DEG_S = 200;
+        /**
+         * CAD v139: de empuje a abajo, rampa de 120°/s como máximo. Al pasar la vertical la lengua
+         * cae por su peso; con la rampa, la manivela va bajando y la lengua la alcanza sin golpe.
+         */
+        public static double DEPLOY_RAMP_DEG_S = 120;
+        /** Ya en su lugar, este tiempo más antes de darla por quieta. */
+        public static double SETTLE_S = 0.1;
+        /** Viejo: lo reemplaza el modelo de velocidad. Se borra al pasar todo a TongueServo. */
         public static double TRAVEL_S = 0.6;
 
         /** Atasco (la misma regla que tenía F2, CAD): BB1 más de esto sin que la garganta cuente. */
