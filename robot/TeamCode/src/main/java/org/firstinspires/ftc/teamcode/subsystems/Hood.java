@@ -64,6 +64,7 @@ public class Hood {
 
     private boolean started = false;
     private boolean nectarRefused = false;      // pidieron NECTAR con los signos sin cuadrar
+    private boolean frozen = false;             // guardado lejos de POLLEN con los signos sin cuadrar
     private long settleUntilNs = 0;
     private long lastUpdateNs = 0;
     private long lastPersistNs = 0;
@@ -144,6 +145,10 @@ public class Hood {
     /**
      * Primer comando: exactamente donde quedó el hood la última vez (sin movimiento).
      * Después update() lo lleva en rampa a POLLEN y δ de casa.
+     *
+     * Si quedó guardado lejos de POLLEN y los signos de los servos ya no cuadran (Config
+     * cambió), mandar esa posición giraría la lámina contra la Limelight: el hood se queda
+     * SIN PWM y avisa. Se arregla Config, o se pone a mano en POLLEN y se confirma en "Tune: Hood".
      */
     public void start(long nowNs) {
         gapCmdDeg = clampGap(store.getDouble(KEY_GAP, HoodCfg.GAP_POLLEN_DEG));
@@ -152,8 +157,29 @@ public class Hood {
         started = true;
         lastUpdateNs = nowNs;
         settleUntilNs = nowNs + (long) (HoodCfg.START_SETTLE_S * 1e9);
+        frozen = !signsConsistent()
+                && Math.abs(gapCmdDeg - HoodCfg.GAP_POLLEN_DEG) > UNCHECKED_GAP_LIMIT_DEG;
         write();
     }
+
+    /**
+     * Solo para "Tune: Hood": el operador confirma que el hood está a mano en POLLEN con δ 0
+     * (por ejemplo, después de que se quedó sin PWM por los signos). Se guarda y se sigue de ahí.
+     */
+    public void assumeAtPollen(long nowNs) {
+        gapCmdDeg = gapTargetDeg = HoodCfg.GAP_POLLEN_DEG;
+        deltaCmdDeg = deltaTargetDeg = HoodCfg.DELTA_HOME_DEG;
+        frozen = false;
+        settleUntilNs = nowNs + (long) (HoodCfg.START_SETTLE_S * 1e9);
+        store.putDouble(KEY_GAP, gapCmdDeg);
+        store.putDouble(KEY_DELTA, deltaCmdDeg);
+        persistedGap = gapCmdDeg;
+        persistedDelta = deltaCmdDeg;
+        write();
+    }
+
+    /** Se quedó sin PWM: guardado lejos de POLLEN con los signos sin cuadrar. */
+    public boolean isFrozen() { return frozen; }
 
     // ---------- órdenes ----------
 
@@ -216,6 +242,8 @@ public class Hood {
         if (!started) start(nowNs);
         double dt = Range.clip((nowNs - lastUpdateNs) / 1e9, 0, 0.1);
         lastUpdateNs = nowNs;
+        if (frozen && signsConsistent()) frozen = false;   // arreglaron Config: sigue de donde quedó
+        if (frozen) return;
 
         double oldGap = gapCmdDeg, oldDelta = deltaCmdDeg;
         // Cambio de gap en tres tiempos: δ al de tránsito, el gap en rampa, δ a lo pedido.
@@ -237,7 +265,7 @@ public class Hood {
      * la pelota pedida necesita el gap de NECTAR y el seguro de los signos lo impide.
      */
     public boolean isReady(long nowNs) {
-        return started && !nectarRefused && gapCmdDeg == gapTargetDeg && deltaCmdDeg == deltaTargetDeg
+        return started && !frozen && !nectarRefused && gapCmdDeg == gapTargetDeg && deltaCmdDeg == deltaTargetDeg
                 && nowNs >= settleUntilNs;
     }
 
@@ -254,6 +282,7 @@ public class Hood {
     // ---------- servos ----------
 
     private void write() {
+        if (frozen) return;                       // sin PWM: el hood no se mueve
         gapServo.setPosition(gapToPosition(gapCmdDeg));
         angleServo.setPosition(angleToPosition(angleServoDeg(gapCmdDeg, deltaCmdDeg)));
     }
@@ -322,7 +351,10 @@ public class Hood {
         telemetry.addData("Hood", "gap %.1f° (%s)  δ %.1f°  servo ángulo %.1f°",
                 gapCmdDeg, isNectarGap() ? "NECTAR" : "POLLEN", deltaCmdDeg,
                 angleServoDeg(gapCmdDeg, deltaCmdDeg));
-        if (!signsConsistent()) {
+        if (frozen) {
+            telemetry.addLine("!! Hood QUIETO (sin PWM): quedó guardado fuera de POLLEN y los signos de sus "
+                    + "servos ya no cuadran. Arregla HoodCfg, o ponlo a mano en POLLEN y confírmalo en \"Tune: Hood\"");
+        } else if (!signsConsistent()) {
             telemetry.addLine("!! Hood: el signo del servo de ángulo no cuadra con el del gap "
                     + "(HoodCfg): no va a NECTAR. Revisa con \"Tune: Hood\"");
         }
