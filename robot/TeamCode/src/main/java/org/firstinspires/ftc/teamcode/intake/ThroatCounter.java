@@ -12,8 +12,11 @@ import org.firstinspires.ftc.teamcode.sensors.BeamSensor;
  *
  *  - Un corte del haz es pelota nueva solo si antes estuvo libre ThroatCfg.CLEAR_S (una
  *    pelota que rebota no cuenta dos veces).
- *  - Hacia adentro se cuenta al LLEGAR (haz cortado ≥ MIN_S): la 4a pelota se queda parada
- *    sobre el haz y nunca lo libera; contarla al salir la contaría dos veces.
+ *  - Hacia adentro se cuenta al LLEGAR (haz cortado ≥ MIN_S), y solo jalando: una pelota que
+ *    se queda parada sobre el haz contada al salir se contaría dos veces.
+ *  - Con la lengua, la 4a puede quedarse en la boca SIN cortar este haz (le faltan 7-24 mm,
+ *    documento del CAD v138, 4.5). No se suma aquí: el robot está lleno por las 3 etapas
+ *    ocupadas más la boca (BallInventory.isFull) y la pelota se cuenta cuando por fin cruza.
  *  - En reversa del piloto se cuenta al LIBERAR el haz, si se queda libre CLEAR_S.
  *  - Una NECTAR rival se resta solo si ya se había sumado; si no, ya no se suma. Se olvida
  *    cuando el V3 deja de verla y el haz queda libre.
