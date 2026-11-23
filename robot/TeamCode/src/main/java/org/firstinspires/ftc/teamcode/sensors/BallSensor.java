@@ -23,6 +23,7 @@ public class BallSensor {
     private long lastReadNs = Long.MIN_VALUE / 2;
     private BallType last = BallType.NONE;
     private boolean fault = false;
+    private int reads = 0;
 
     public BallSensor(ColorReader reader, ColorClassifier.Thresholds thresholds, double minIntervalS) {
         this.reader = reader;
@@ -43,6 +44,7 @@ public class BallSensor {
     public BallType read(long nowNs) {
         if (nowNs - lastReadNs >= minIntervalNs) {
             lastReadNs = nowNs;
+            reads++;
             fault = !reader.read(raw);
             last = fault ? BallType.UNKNOWN : ColorClassifier.classify(raw[0], raw[1], raw[2], raw[3], thresholds);
         }
@@ -55,6 +57,9 @@ public class BallSensor {
 
     /** Distancia de la última lectura, en mm (NaN con falla). */
     public double distanceMm() { return fault ? Double.NaN : raw[3]; }
+
+    /** Cuántas veces se ha leído de verdad (para saber si una lectura es nueva). */
+    public int readCount() { return reads; }
 
     /** Algún canal saturado: el color no es confiable (bajar COLOR_GAIN). */
     public boolean isSaturated() {
