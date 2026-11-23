@@ -16,7 +16,8 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
  * cada uno va en su propio bus.
  *
  * Lo que hace el SDK 12.0 (leído con javap) y aquí se toma en cuenta:
- *  - De fábrica el sensor mide color y distancia cada 100 ms. Aquí se pone a 25 ms.
+ *  - De fábrica el sensor mide color y distancia cada 100 ms. Aquí se pone a 25 ms, y la
+ *    distancia a 12.5 ms si se pide (el V3 de arriba, para el fin de LIFT).
  *  - setGain es ganancia de software: multiplica y recorta a 1. Con mucha, se satura.
  *  - Si el I2C falla, el SDK no avisa: regresa bytes en cero (color 0 y 152.4 mm, lo mismo
  *    que "no hay nada"). Por eso se revisa la salud del dispositivo y esa firma exacta.
@@ -28,13 +29,19 @@ public class RevColorReader implements ColorReader {
     private HardwareDeviceHealth health;
 
     public RevColorReader(HardwareMap hardwareMap, String name, float gain) {
+        this(hardwareMap, name, gain, false);
+    }
+
+    /** @param fastProximity distancia cada 12.5 ms en vez de cada 25 */
+    public RevColorReader(HardwareMap hardwareMap, String name, float gain, boolean fastProximity) {
         this.color = hardwareMap.get(NormalizedColorSensor.class, name);
         this.distance = hardwareMap.get(DistanceSensor.class, name);
         this.gain = gain;
         if (color instanceof RevColorSensorV3) {
             RevColorSensorV3 v3 = (RevColorSensorV3) color;
             BroadcomColorSensor.Parameters p = v3.getParameters().clone();   // clone: el original es interno
-            p.proximityMeasRate = BroadcomColorSensor.PSMeasurementRate.R25ms;
+            p.proximityMeasRate = fastProximity ? BroadcomColorSensor.PSMeasurementRate.R12_5ms
+                    : BroadcomColorSensor.PSMeasurementRate.R25ms;
             p.lightSensorMeasRate = BroadcomColorSensor.LSMeasurementRate.R25ms;
             v3.initialize(p);
             health = v3.getDeviceClient();
