@@ -26,9 +26,12 @@ import org.firstinspires.ftc.teamcode.vision.RivalNectarDetector;
  *
  * Sirve para calibrar SensorCfg:
  *  - Pon una POLLEN, una NECTAR roja y una azul frente a cada V3 y anota hue, saturación
- *    y distancia. Ajusta UPPER, COPA y THROAT y los rangos de ColorClassifier.
+ *    y distancia. Ajusta UPPER, COPA y THROAT y los rangos de ColorClassifier. En la
+ *    garganta, prueba cada pelota pegada a cada pared de la fila (CALC: NECTAR de 8.3 a
+ *    14.1 mm y POLLEN de 6.3 a 33.1): ahí el tamaño no separa una de otra.
  *  - Corta cada break-beam con la mano: tiene que decir "cortado". Si dice lo contrario,
- *    cambia BEAM_ACTIVE_HIGH.
+ *    cambia BEAM_ACTIVE_HIGH. Si no lee estable (el BB1 mide 258 mm de LED a LED), una
+ *    resistencia de 10 kΩ de la señal a 3.3 V.
  *  - Con el tubo vacío, cada V3 tiene que dar color distinto de 0. "SIN LECTURA" es cable
  *    o I2C. "SATURADO" = bajar SensorCfg.COLOR_GAIN.
  *  - La C270 usa los rangos genéricos del SDK: revisa que vea una NECTAR azul a ~60 cm y
@@ -53,8 +56,8 @@ public class TestSensors extends LinearOpMode {
         long lastStatusNs = 0;
         while (opModeIsActive()) {
             long now = System.nanoTime();
-            line("V3 arriba (z 126)", upper, now);
-            line("V3 copa (z 50)", copa, now);
+            line("V3 arriba (z 128)", upper, now);
+            line("V3 copa (z 52)", copa, now);
             line("V3 garganta", throat, now);
             telemetry.addData("BB1 boca", state(mouth, "cortado", "libre"));
             telemetry.addData("BB garganta", state(throatBeam, "cortado", "libre"));
