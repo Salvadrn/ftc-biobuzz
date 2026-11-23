@@ -213,10 +213,13 @@ public class Feeder {
                 elevator.setPower(0);
                 if (liftCheck && secondsIn(nowNs) >= FeederCfg.LIFT_CHECK_S) {
                     liftCheck = false;
-                    if (!inCopa.isBall()) {
+                    if (!inCopa.isBall() && upperOccupied) {          // sí llegó arriba, pero sin pasar el V3
+                        refillFails = 0;
+                        warning = "la pelota de arriba pudo quedar baja (no pasó el V3 de arriba)";
+                    } else if (!inCopa.isBall()) {
                         refillBlocked = true;
                         warning = "una pelota se quedó en el tubo entre la copa y arriba";
-                    }
+                    }                                                  // regresó a la copa: otro intento
                 }
                 boolean wantsShot = (shotRequested && upperOccupied) || forceRequested;
                 if (wantsShot && copaDown && flywheelOn) {
@@ -337,15 +340,13 @@ public class Feeder {
                     liftFirstMm, liftMinMm, (liftPassNs - stateStartNs) / 1e9, FeederCfg.LIFT_EXTRA_MM);
             endLift(nowNs);
         } else if (secondsIn(nowNs) >= FeederCfg.LIFT_TIMEOUT_S) {
+            // Vista y sin pasar puede ser que quedó baja o que nunca salió de la copa (con la
+            // copa arriba, una NECTAR se ve a 12.5 mm): con la copa abajo se revisa (liftCheck)
             elevator.setPower(0);
-            if (liftSeen) {                        // está arriba, pero no pasó el lente: quedó baja
-                warning = "la pelota de arriba quedó baja (no pasó el V3 de arriba)";
-                liftTrace = String.format("vista a %.1f mm, mínimo %.1f mm, NUNCA pasó", liftFirstMm, liftMinMm);
-            } else {
-                refillFailed("la pelota no subió a la etapa de arriba");
-                liftCheck = true;
-                liftTrace = "el V3 de arriba nunca la vio";
-            }
+            refillFailed(liftSeen ? "la pelota no pasó el V3 de arriba" : "la pelota no subió a la etapa de arriba");
+            liftCheck = true;
+            liftTrace = liftSeen ? String.format("vista a %.1f mm, mínimo %.1f mm, NUNCA pasó", liftFirstMm, liftMinMm)
+                    : "el V3 de arriba nunca la vio";
             endLift(nowNs);
         } else {
             elevator.setPower(liftSeen ? FeederCfg.LIFT_SEAT_POWER : FeederCfg.ELEVATOR_STAGE_POWER);
