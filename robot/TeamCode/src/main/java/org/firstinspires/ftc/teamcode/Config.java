@@ -412,8 +412,6 @@ public final class Config {
         public static double DEPLOY_RAMP_DEG_S = 120;
         /** Ya en su lugar, este tiempo más antes de darla por quieta. */
         public static double SETTLE_S = 0.1;
-        /** Viejo: lo reemplaza el modelo de velocidad. Se borra al pasar todo a TongueServo. */
-        public static double TRAVEL_S = 0.6;
 
         /** Atasco (la misma regla que tenía F2, CAD): BB1 más de esto sin que la garganta cuente. */
         public static double UNJAM_MOUTH_S = 0.25;
