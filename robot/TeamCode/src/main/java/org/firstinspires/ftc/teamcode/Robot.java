@@ -181,7 +181,7 @@ public class Robot {
      * sabiendo si la fila puede recibir la siguiente pelota.
      */
     public void updateIntake(long nowNs) {
-        intake.update(nowNs, isFull(), feeder.isFilaPullingIn());
+        intake.update(nowNs, isFull(), feeder.isFilaPullingIn(), feeder.filaHasBall());
     }
 
     /**
