@@ -688,6 +688,12 @@ public class Sim {
     /** Altura del centro a la que la pelota toca el flywheel (CAD, D106). */
     static double flywheelContactZ(BallType b) { return b == BallType.POLLEN ? 170.8 : 156.5; }
 
+    /**
+     * Hasta dónde la sostienen las Gecko de z 128 (CAD v146, D131): más arriba ya no las toca y
+     * la cuña de las locas con resorte la puede empujar hacia el flywheel.
+     */
+    static double geckoHoldZ(BallType b) { return b == BallType.POLLEN ? 145.4 : 147.0; }
+
     static final class BallWorld {
         BallType throat = BallType.NONE, fila = BallType.NONE, copa = BallType.NONE, upper = BallType.NONE;
         double copaMm = 0;
@@ -703,6 +709,7 @@ public class Sim {
         double coneDeg = 30;              // el V3 de arriba ve hasta este ángulo de su eje
         double upperSampleT = -1, upperSampleMm = 200;
         BallType upperSampleType = BallType.NONE;
+        boolean encoderDead = false;      // el encoder del elevador no está conectado
         double upperNoiseMm = 0;          // ruido (desviación) de la distancia del V3 de arriba
         double upperFloorMm = 0;          // el V3 de arriba nunca marca menos que esto (curva más plana)
         Random noise = new Random(1);
@@ -870,7 +877,8 @@ public class Sim {
             bw.filaPushS = 0;
         }
 
-        // Elevador
+        // Elevador (su encoder cuenta la superficie de las Gecko)
+        if (!bw.encoderDead) elev.pos += ePow * LIFT_MM_S_PER_POWER / FeederCfg.ELEVATOR_MM_PER_TICK * dt;
         if (ePow > 0.5 && bw.upper.isBall()) {
             bw.fireS += dt;
             if (bw.fireS >= bw.fireNeedS) {
@@ -1217,12 +1225,17 @@ public class Sim {
                 double z = r.bw.upperZOrDefault();
                 double low = copaCenterZ(pair[1], 0) + radius(pair[0]) + radius(pair[1]);
                 boolean staged = r.bw.upper == pair[0] && r.bw.copa == pair[1];
-                check(String.format("fin de LIFT, cono %.0f°, %s sobre %s: entre la de la copa y el flywheel", cone,
-                        pair[0] == N ? "NECTAR" : "POLLEN", pair[1] == N ? "NECTAR" : "POLLEN"),
-                        staged && ra[0] == 1 && !r.bw.hazard && z >= low && z < flywheelContactZ(pair[0])
-                                && r.f.liftTrace().contains("pasó a"),
-                        String.format("centro en z %.1f (%.1f a %.1f); %s %s", z, low, flywheelContactZ(pair[0]),
+                check(String.format("fin de LIFT, cono %.0f°, %s sobre %s: sin tocar la de la copa y sostenida por las Gecko",
+                                cone, pair[0] == N ? "NECTAR" : "POLLEN", pair[1] == N ? "NECTAR" : "POLLEN"),
+                        staged && ra[0] == 1 && !r.bw.hazard && z >= low && z <= geckoHoldZ(pair[0])
+                                && r.f.liftTrace().contains(FeederCfg.LIFT_BY_ENCODER ? "con el encoder" : "pasó a"),
+                        String.format("centro en z %.1f (%.1f a %.1f); %s %s", z, low, geckoHoldZ(pair[0]),
                                 r.f.liftTrace(), r.bw.hazardWhy));
+                java.util.regex.Matcher mz = java.util.regex.Pattern.compile("z ≈ ([0-9.]+)").matcher(r.f.liftTrace());
+                if (cone == 30 && pair[1] == N) {
+                    check(String.format("el encoder del elevador da dónde quedó la %s (±1 mm)", pair[0] == N ? "NECTAR" : "POLLEN"),
+                            mz.find() && Math.abs(Double.parseDouble(mz.group(1)) - z) <= 1.0, r.f.liftTrace());
+                }
             }
         }
         // Referencia: si el V3 de arriba solo viera ±20°, la de arriba ya en su etapa (~22°) no se vería
@@ -1255,39 +1268,68 @@ public class Sim {
         return r;
     }
 
+    /** NECTAR sobre NECTAR: sin tocar la de la copa (z 144.8) y sostenida por las Gecko (z 147.0). */
     static boolean stagedInWindow(FeederRig r) {
         double z = r.bw.upperZOrDefault();
         return r.bw.upper == BallType.NECTAR_RED && !r.bw.hazard
-                && z >= copaCenterZ(BallType.NECTAR_RED, 0) + 2 * radius(BallType.NECTAR_RED) && z < 156.5;
+                && z >= copaCenterZ(BallType.NECTAR_RED, 0) + 2 * radius(BallType.NECTAR_RED)
+                && z <= geckoHoldZ(BallType.NECTAR_RED);
     }
 
-    static int liftOutOfWindow(double sigma, String[] worst) {
-        int bad = 0;
+    /**
+     * NECTAR sobre NECTAR con ruido en el V3 de arriba, 30 intentos: {cuántas quedan arriba de lo
+     * que sostienen las Gecko (o tocan el flywheel), cuántas quedan tocando la de la copa, z más baja}.
+     */
+    static double[] liftNoiseRuns(double sigma) {
+        int high = 0, low = 0;
+        double lowest = 999;
         for (long seed = 1; seed <= 30; seed++) {
             FeederRig r = liftRig(sigma, seed, 0, 0);
-            if (!stagedInWindow(r)) {
-                bad++;
-                worst[0] = String.format("semilla %d: z %.1f %s", seed, r.bw.upperZOrDefault(), r.bw.hazardWhy);
-            }
+            double z = r.bw.upperZOrDefault();
+            if (z > geckoHoldZ(BallType.NECTAR_RED) || r.bw.hazardWhy.contains("flywheel")) high++;
+            if (z < copaCenterZ(BallType.NECTAR_RED, 0) + 2 * radius(BallType.NECTAR_RED)) low++;
+            lowest = Math.min(lowest, z);
         }
-        return bad;
+        return new double[]{high, low, lowest};
     }
 
     static void testFeederLiftNoise() {
-        String[] worst = {""};
-        int bad = liftOutOfWindow(0.3, worst);
-        check("fin de LIFT con ruido de 0.3 mm en el V3 de arriba: la de arriba en su ventana (30 intentos)",
-                bad == 0, bad + " de 30 fuera " + worst[0]);
-        int bad5 = liftOutOfWindow(0.5, worst);
-        System.out.printf("      (referencia, ruido de 0.5 mm: %d de 30 fuera de la ventana; si el V3 es así de ruidoso,"
-                + " subir LIFT_AVG_SAMPLES y bajar LIFT_EXTRA_MM)%n", bad5);
+        // Con el encoder el ruido del V3 no cambia dónde queda (el V3 solo confirma que la vio)
+        for (double sigma : new double[]{0.3, 0.5}) {
+            double[] n = liftNoiseRuns(sigma);
+            check(String.format("fin de LIFT con encoder y ruido de %.1f mm en el V3: entre la de la copa y las Gecko (30)",
+                    sigma), n[0] == 0 && n[1] == 0, String.format("%d arriba, %d tocando la de la copa", (int) n[0], (int) n[1]));
+        }
         FeederRig d = liftRig(0, 1, 0, 0.03);
         check("fin de LIFT: un parpadeo de 30 ms al empezar a subir no la deja baja", stagedInWindow(d),
                 String.format("z %.1f; %s", d.bw.upperZOrDefault(), d.f.liftTrace()));
-        FeederRig flat = liftRig(0, 1, 11, 0);   // la distancia nunca baja de 11 mm (8.5 en el lente)
-        check("fin de LIFT con una curva más plana: el tope de recorrido no la deja tocar el flywheel",
-                !flat.bw.hazardWhy.contains("flywheel") && flat.bw.upper == BallType.NECTAR_RED,
-                String.format("z %.1f; %s", flat.bw.upperZOrDefault(), flat.f.liftTrace()));
+
+        // Sin encoder (sin cable): avisa y termina con el V3
+        FeederRig dead = new FeederRig();
+        dead.bw.encoderDead = true;
+        dead.bw.copa = BallType.NECTAR_RED;
+        dead.bw.fila = BallType.NECTAR_RED;
+        runRig(dead, 400, false);
+        check("sin encoder del elevador: avisa y termina la subida con el V3 de arriba",
+                stagedInWindow(dead) && dead.f.getWarning().contains("encoder") && dead.f.liftTrace().contains("con el V3"),
+                String.format("z %.1f; aviso '%s'", dead.bw.upperZOrDefault(), dead.f.getWarning()));
+
+        // Con el V3 (sin encoder): el ruido reparte el final ±3 mm alrededor de lo que sostienen las Gecko
+        boolean savedEnc = FeederCfg.LIFT_BY_ENCODER;
+        FeederCfg.LIFT_BY_ENCODER = false;
+        try {
+            for (double sigma : new double[]{0.3, 0.5}) {
+                double[] n = liftNoiseRuns(sigma);
+                System.out.printf("      (referencia, con el V3 y ruido de %.1f mm: %d de 30 arriba de lo que sostienen las Gecko,"
+                        + " %d tocando la de la copa, la más baja en z %.1f)%n", sigma, (int) n[0], (int) n[1], n[2]);
+            }
+            FeederRig flat = liftRig(0, 1, 11, 0);   // la distancia nunca baja de 11 mm (8.5 en el lente)
+            check("con el V3 y una curva más plana: el tope de recorrido no la deja tocar el flywheel",
+                    !flat.bw.hazardWhy.contains("flywheel") && flat.bw.upper == BallType.NECTAR_RED,
+                    String.format("z %.1f; %s", flat.bw.upperZOrDefault(), flat.f.liftTrace()));
+        } finally {
+            FeederCfg.LIFT_BY_ENCODER = savedEnc;
+        }
     }
 
     static void testFeederTopFlicker() {
