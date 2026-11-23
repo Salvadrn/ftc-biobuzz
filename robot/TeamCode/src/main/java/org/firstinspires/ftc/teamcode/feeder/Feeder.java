@@ -91,6 +91,8 @@ public class Feeder {
     private long liftLostSinceNs = -1;             // ya vista, sin verla desde aquí
     private long liftPassNs = -1;                  // la distancia ya pasó su mínimo
     private double liftTravelMm = 0, liftPower = 0;
+    private double[] liftWin = new double[0];      // últimas distancias viéndola (promedio)
+    private int liftWinN = 0, liftWinI = 0;
     private BallType liftBall = BallType.UNKNOWN;  // la que sube (su tope de recorrido)
     private String liftCheckWhy = "";
     private String liftTrace = "";                 // cómo terminó la última subida (para calibrar)
@@ -347,13 +349,17 @@ public class Feeder {
         if (!liftSeen) {
             if (upperSeen) {
                 liftSeen = true;
-                liftFirstMm = liftMinMm = d;
+                liftFirstMm = d;
+                liftWin = new double[Math.max(1, FeederCfg.LIFT_AVG_SAMPLES)];
+                liftWinN = liftWinI = 0;
+                liftMinMm = average(d);
             }
         } else if (liftPassNs < 0) {
             if (upperSeen) {
                 liftLostSinceNs = -1;
-                liftMinMm = Math.min(liftMinMm, d);
-                if (d <= liftMinMm + FeederCfg.LIFT_PASS_MM) {
+                double avg = average(d);
+                liftMinMm = Math.min(liftMinMm, avg);
+                if (avg <= liftMinMm + FeederCfg.LIFT_PASS_MM) {
                     liftAboveSinceNs = -1;
                 } else if (liftAboveSinceNs < 0) {
                     liftAboveSinceNs = nowNs;
@@ -386,6 +392,16 @@ public class Feeder {
             liftPower = liftSeen ? FeederCfg.LIFT_SEAT_POWER : FeederCfg.ELEVATOR_STAGE_POWER;
             elevator.setPower(liftPower);
         }
+    }
+
+    /** Agrega una distancia viéndola y regresa el promedio de las últimas LIFT_AVG_SAMPLES. */
+    private double average(double d) {
+        liftWin[liftWinI] = d;
+        liftWinI = (liftWinI + 1) % liftWin.length;
+        if (liftWinN < liftWin.length) liftWinN++;
+        double sum = 0;
+        for (int i = 0; i < liftWinN; i++) sum += liftWin[i];
+        return sum / liftWinN;
     }
 
     /** La subida no terminó bien: se detiene, cuenta como falla y se revisa con la copa abajo. */
