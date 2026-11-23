@@ -81,6 +81,11 @@ public class TuneFeeder extends LinearOpMode {
         while (opModeIsActive()) {
             long now = System.nanoTime();
             String note = "";
+            // Se leen en cada ciclo: *WasPressed se queda guardado hasta leerse, y uno apretado en
+            // modo ciclo subiría la copa al regresar a manual
+            boolean copaUpPressed = gamepad1.dpadRightWasPressed();
+            boolean copaDownPressed = gamepad1.dpadLeftWasPressed();
+            boolean liftPressed = gamepad1.dpadUpWasPressed();
             if (gamepad1.yWasPressed()) {
                 cycleMode = !cycleMode;
                 feeder.stop();
@@ -122,18 +127,18 @@ public class TuneFeeder extends LinearOpMode {
                 }
 
                 // Copa a 0, 27 o 54 mm para ver qué lee el V3 de arriba (nunca sube con pelota arriba)
-                if (gamepad1.dpadRightWasPressed() && copaLevel < copaLevels.length - 1) {
+                if (copaUpPressed && copaLevel < copaLevels.length - 1) {
                     if (feeder.getCopaMm() == 0 && upper.hasBall()) {
                         note = "arriba hay pelota (o el V3 no lee): la copa no sube";
                     } else {
                         copaLevel++;
                     }
                 }
-                if (gamepad1.dpadLeftWasPressed() && copaLevel > 0) copaLevel--;
+                if (copaDownPressed && copaLevel > 0) copaLevel--;
                 feeder.setCopaTargetForTuning(copaLevels[copaLevel]);
 
                 double elev = 0;
-                if (gamepad1.dpadUpWasPressed()) minUpperMm = Double.NaN;   // nueva subida
+                if (liftPressed) minUpperMm = Double.NaN;   // nueva subida
                 if (gamepad1.dpad_up) elev = FeederCfg.ELEVATOR_STAGE_POWER;
                 boolean canReverse = feeder.getCopaMm() == 0 && !inCopa.hasBall();
                 if (gamepad1.dpad_down && canReverse) elev = -FeederCfg.ELEVATOR_REVERSE_POWER;
