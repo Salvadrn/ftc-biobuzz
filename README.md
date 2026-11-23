@@ -267,7 +267,10 @@ Del documento del CAD v138 (6.2). Cada paso dice qué valor de `Config` sale de 
    `COPA_DOWN_US`); `COPA_UP_US` a 54 mm con vernier. Se limita a 54 mm de cálculo sobre
    el piso marcado.
 6. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador y de su encoder
-   (subir = más cuentas; mm por cuenta con regla), y **medir antes de dejar que rellene
+   (subir = más cuentas), **cuánto avanza la pelota por cuenta**, por separado NECTAR y
+   POLLEN, desde la copa arriba hasta la etapa (calibrador al centro contra las cuentas;
+   `LIFT_BALL_MM_PER_TICK_*`: arranca en los 0.693 mm de la superficie de las Gecko, y la
+   pelota avanza entre la mitad y eso: sin medir queda más baja, nunca más alta), y **medir antes de dejar que rellene
    solo** lo que lee el V3 de arriba: con NECTAR en la copa abajo (tiene que leer más que
    50 mm), con la pelota en la copa a 0, 27 y 54 mm (`COPA_UPPER_BLIND_MM`), subiendo a la
    etapa y ya en su etapa (**la tiene que seguir viendo**: si no, la copa subiría contra
