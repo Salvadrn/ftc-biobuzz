@@ -44,12 +44,19 @@ de z 52) → **etapa de arriba** (Gecko de z 128 y una loca con resorte, V3 de z
 - Disparar = prender el elevador hasta que la pelota de arriba se vaya. El tiro **solo se
   cuenta** si el flywheel lo sintió (caída de rpm) y el V3 de arriba ya no la ve.
 - Rellenar = la copa sube la de abajo hasta las Gecko de z 95 y el elevador la sube a su
-  etapa. El V3 de arriba la ve **antes** de que llegue (su distancia baja a un mínimo con
-  el centro de la pelota a la altura del lente y vuelve a subir): ya vista sube despacio,
-  hasta que la distancia (promediada) pasa su mínimo un rato seguido y un tramo más. Tiene
-  que quedar con el centro entre z 144.8 (no toca una NECTAR en la copa) y el flywheel
-  (NECTAR 156.5): 11.7 mm. Un parpadeo del V3 no cuenta; si la pierde de vista un rato o el
-  recorrido estimado llega a su tope (`LIFT_MAX_*`), se detiene y se revisa con la copa abajo.
+  etapa. **Dónde se detiene importa mucho** (CAD v146): las Gecko de z 128 la sostienen solo
+  hasta z 147.0 (NECTAR) y 145.4 (POLLEN); más arriba la cuña de las locas con resorte la
+  puede empujar hacia el flywheel. Abajo no puede tocar la de la copa: z 144.8 con NECTAR
+  sobre NECTAR. Son 2.2 mm, así que se detiene con el **encoder del elevador** a una altura
+  fija desde la copa arriba (`LIFT_TARGET_Z_*`: 145.9 NECTAR, 140.0 POLLEN), despacio al
+  final, y el V3 de arriba solo confirma que la vio. Como el encoder cuenta las Gecko y no
+  la pelota, con la copa abajo se confirma que sí salió de la copa.
+- Sin encoder (o si no cuenta: avisa) se usa el V3 de arriba, que la ve **antes** de que
+  llegue: su distancia (promediada) baja a un mínimo con el centro a la altura del lente y
+  vuelve a subir; se detiene cuando pasa su mínimo. Con ruido reparte el final ±3 mm. Un
+  parpadeo del V3 no cuenta; si la pierde de vista un rato o el recorrido estimado llega a
+  su tope (`LIFT_MAX_*`), se detiene y se revisa con la copa abajo.
+- El elevador siempre en BRAKE, nunca FLOAT.
 - La copa **nunca** sube si hay pelota esperando arriba: las dos se tocarían. Eso se decide
   con la copa abajo, con arriba vacío `UPPER_EMPTY_CONFIRM_S` seguidos (un parpadeo del V3
   no basta); ya subiendo, el V3 de arriba puede ver la pelota de la propia copa, así que
@@ -196,7 +203,7 @@ usa `tryGet` y sigue sin él.
 | Control Hub | Digital 7 | `bbFila` | Digital Device (BB3) |
 | Expansion Hub | Motor 0 + encoder 0 | `flywheel` | goBILDA 5203-2402-0001 (1:1) |
 | Expansion Hub | Motor 1 (encoder opcional: no se usa) | `intake` | goBILDA 5203-2402-0005 (5.2:1), M_F |
-| Expansion Hub | Motor 2 | `elevador` | goBILDA 5203-2402-0005 (5.2:1) |
+| Expansion Hub | Motor 2 + encoder 2 | `elevador` | goBILDA 5203-2402-0005 (5.2:1) |
 | Expansion Hub | Servo 0 | `hoodGap` | Servo (2000-0025-0002) |
 | Expansion Hub | Servo 2 | `hoodAngulo` | Servo (2000-0025-0002) |
 | Expansion Hub | Servo 4 | `lengua` | Servo (2000-0025-0002), despliega la lengua del intake |
@@ -210,6 +217,10 @@ usa `tryGet` y sigue sin él.
   extensión** (CALC del CAD).
 - El Limelight pide un USB-C en ángulo recto: entre la pared -X de su carcasa y la placa
   lateral izquierda quedan ~12.6 mm (CAD v100).
+- El encoder del elevador va al encoder 2 (CAD v146): cable goBILDA 3801-0709-0600 (600 mm,
+  JST PH en la hub y JST XH en el motor), en diagonal junto al cable de fuerza del motor
+  (~380 mm en línea recta, ~600 por las orillas del marco); de respaldo, la extensión
+  3802-0910-0300. Sin él, la subida se termina con el V3 de arriba (menos precisa).
 
 La [hoja de cableado](docs/cableado.html) es del diseño de **septiembre** (antes del CAD
 v99): sirve para lo eléctrico general (XT30, RS485, pares de servos, USB 3.0), pero sus
@@ -255,12 +266,18 @@ Del documento del CAD v138 (6.2). Cada paso dice qué valor de `Config` sale de 
 5. **Tune: Copa**: encontrar el piso con la corriente y marcarlo con X (a ±60 µs de
    `COPA_DOWN_US`); `COPA_UP_US` a 54 mm con vernier. Se limita a 54 mm de cálculo sobre
    el piso marcado.
-6. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador, y **medir antes
-   de dejar que rellene solo** lo que lee el V3 de arriba: con NECTAR en la copa abajo
-   (tiene que leer más que 50 mm), con la pelota en la copa a 0, 27 y 54 mm
-   (`COPA_UPPER_BLIND_MM`), subiendo a la etapa y ya en su etapa (**la tiene que seguir
-   viendo**: si no, la copa subiría contra ella). Luego el ciclo completo: "Última subida"
-   y dónde se queda la de arriba (`LIFT_*`: centro entre z 145 y 156 con NECTAR).
+6. **Tune: Alimentador**: signo de `FILA_POWER_IN`, sentido del elevador y de su encoder
+   (subir = más cuentas; mm por cuenta con regla), y **medir antes de dejar que rellene
+   solo** lo que lee el V3 de arriba: con NECTAR en la copa abajo (tiene que leer más que
+   50 mm), con la pelota en la copa a 0, 27 y 54 mm (`COPA_UPPER_BLIND_MM`), subiendo a la
+   etapa y ya en su etapa (**la tiene que seguir viendo**: si no, la copa subiría contra
+   ella; CALC del CAD: NECTAR a z 147 queda a ~20° de su eje). Luego la **prueba de banco
+   del CAD**, con el flywheel **apagado**: deja que suba una pelota y mira si la de arriba
+   se queda, baja o se trepa, con NECTAR y con POLLEN, con y sin pelota en la copa
+   ("Última subida" da la altura con el encoder). Se ajusta `LIFT_TARGET_Z_*` dentro de lo
+   que sostienen las Gecko (NECTAR 144.8 a 147.0). Si se trepa o no cabe, avisar al CAD. Si
+   el V3 no ve bien, el CAD propone inclinarlo ~10° (cambio de piezas; lo decide Adrián):
+   entonces hay que volver a medir todo esto.
 7. **Tune: Lengua** con el procedimiento del documento del CAD (calado, sentido, empuje,
    abajo por despegue, plegada desde la vertical, signo de M_F y velocidad). Criterios:
    `PUSH_US - FOLDED_US` ≈ 514 µs y `DOWN_US - PUSH_US` ≈ 482 µs; `PUSH_US - 1516` es el
