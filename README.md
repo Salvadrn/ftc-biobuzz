@@ -46,11 +46,14 @@ de z 52) → **etapa de arriba** (Gecko de z 128 y una loca con resorte, V3 de z
 - Rellenar = la copa sube la de abajo hasta las Gecko de z 95 y el elevador la sube a su
   etapa. El V3 de arriba la ve **antes** de que llegue (su distancia baja a un mínimo con
   el centro de la pelota a la altura del lente y vuelve a subir): ya vista sube despacio,
-  hasta que la distancia pasa su mínimo y un tramo más. Tiene que quedar con el centro
-  entre z 144.8 (no toca una NECTAR en la copa) y el flywheel (NECTAR 156.5): 11.7 mm.
+  hasta que la distancia (promediada) pasa su mínimo un rato seguido y un tramo más. Tiene
+  que quedar con el centro entre z 144.8 (no toca una NECTAR en la copa) y el flywheel
+  (NECTAR 156.5): 11.7 mm. Un parpadeo del V3 no cuenta; si la pierde de vista un rato o el
+  recorrido estimado llega a su tope (`LIFT_MAX_*`), se detiene y se revisa con la copa abajo.
 - La copa **nunca** sube si hay pelota esperando arriba: las dos se tocarían. Eso se decide
-  con la copa abajo; ya subiendo, el V3 de arriba puede ver la pelota de la propia copa, así
-  que solo aborta si ve algo en los primeros `COPA_UPPER_BLIND_MM` (MEDIR).
+  con la copa abajo, con arriba vacío `UPPER_EMPTY_CONFIRM_S` seguidos (un parpadeo del V3
+  no basta); ya subiendo, el V3 de arriba puede ver la pelota de la propia copa, así que
+  solo aborta si ve algo en los primeros `COPA_UPPER_BLIND_MM` (MEDIR).
 - Con la copa ocupada, la 3a se para en el primer corte de BB3 y sigue `FILA_SEAT_S` para
   asentarse en su lugar del CAD.
 - El gap del hood se elige por el color de la pelota que va a salir. Una pelota de color
@@ -58,10 +61,11 @@ de z 52) → **etapa de arriba** (Gecko de z 128 y una loca con resorte, V3 de z
 
 **Lleno (G407)**: por la cuenta, o con arriba, copa y fila ocupadas y otra pelota en la
 entrada del intake. Con la lengua la 4a se queda en la boca sin cortar el haz de la
-garganta: corta BB1, y con BB1 cortado `FULL_MOUTH_S` seguidos el robot está lleno. Esa
-pelota **no** se suma a la cuenta hasta que cruza la garganta (si se sumara en la boca,
-al cruzar después de un tiro se contaría dos veces y el robot se quedaría "lleno" con 3).
-La telemetría dice "+1 en la entrada".
+garganta: corta BB1, y con BB1 cortado `FULL_MOUTH_S` seguidos el robot está lleno. Solo
+BB1: el haz de la garganta lo puede estar cortando la 3a misma (una NECTAR sin asentar).
+Esa pelota **no** se suma a la cuenta hasta que cruza la garganta con M_F jalando (si se
+sumara en la boca, al cruzar después de un tiro se contaría dos veces y el robot se
+quedaría "lleno" con 3). La telemetría dice "+1 en la entrada".
 
 Cuando algo falla, el robot se detiene en vez de adivinar (la telemetría dice qué pasó):
 
@@ -84,11 +88,13 @@ Cuando algo falla, el robot se detiene en vez de adivinar (la telemetría dice q
   seguidos): se detiene en BRAKE y avisa; vuelve a intentar cuando el piloto cambia lo que
   pide. Sacando una rival, la rival queda "atorada" (todo quieto).
 - **Pelota esperando** en la entrada mientras la fila no puede recibir (fila ocupada, o la
-  copa ocupada o moviéndose): M_F en BRAKE; no cuenta como atasco.
+  copa ocupada o moviéndose): M_F en BRAKE; no cuenta como atasco ni como llegada.
 - **Lengua sin calibrar** (`IntakeLenguaCfg.CALIBRATED = false`, como viene): ni la lengua
   ni M_F se mueven en el TeleOp; en INIT avisa que se pliegue a mano.
 - **Hood con los signos sin cuadrar** (ver abajo): se queda en POLLEN y no se da por listo
-  para una pelota que necesita el gap de NECTAR.
+  para una pelota que necesita el gap de NECTAR. Si además quedó guardado fuera de POLLEN,
+  al arrancar se queda **sin PWM**: se arregla Config, o se pone a mano en POLLEN y se
+  confirma con back en "Tune: Hood".
 
 ## Lo que no es obvio
 
@@ -330,20 +336,24 @@ virtual y las clases reales del robot:
   `SHOT_DIP_RPM` 250 dejan el tiro "sin confirmar".
 - Alimentador con un modelo de pelotas que suben de forma continua y un V3 de arriba que
   lee la distancia geométrica con conos de 30° y 45°: 4 tiros, sin subir la copa con
-  pelota arriba, la de arriba entre la de la copa y el flywheel (las 4 combinaciones), ver
-  la pelota de la propia copa no aborta, la 3a se asienta, y con fallas a propósito: V3
-  sin lectura, parpadeo del V3, pelota atorada antes del flywheel, flywheel apagado a
-  medio tiro, rellenado que falla (también una NECTAR que se ve arriba pero no sale de la
-  copa) y fila atorada.
+  pelota arriba, la de arriba entre la de la copa y el flywheel (las 4 combinaciones, con
+  ruido de 0.3 mm en 30 intentos, con un parpadeo al empezar y con una curva más plana que
+  termina en el tope de recorrido), ver la pelota de la propia copa no aborta, un parpadeo
+  de 100 ms arriba no sube la copa, la 3a se asienta, y con fallas a propósito: V3 sin
+  lectura, parpadeo del V3, pelota atorada antes del flywheel, flywheel apagado a medio
+  tiro, rellenado que falla (también una NECTAR que se ve arriba pero no sale de la copa)
+  y fila atorada.
 - Intake: rechazo de NECTAR rival (contada, sin contar y que se queda), rebotes en la
   garganta, una pelota parada sobre el haz y atascos.
 - Lengua (con los µs de cálculo): plegada y suelta en INIT (no se pliega con pelota en la
   boca o en la garganta), se queda plegada al dar Play con 4 pelotas, salta al empuje y
   baja en rampa de 800 µs/s como máximo, solo entonces jala, con 4 se queda abajo en
   BRAKE, y con una rival primero baja y luego hace reversa. La 4a en la boca sin cortar la
-  garganta pone LLENO sin reversas, no se cuenta dos veces aunque corte la garganta a
-  ratos, espera mientras la fila no jala y se cuenta una vez al entrar. M_F con
-  sobrecorriente se detiene y espera al piloto. Sin calibrar no se mueve nada.
+  garganta pone LLENO sin reversas (aunque la fila pareciera jalar), no se cuenta dos veces
+  aunque corte la garganta a ratos (lleno o esperando), espera mientras la fila no jala y
+  se cuenta una vez al entrar; la 3a sin asentar en el haz de la garganta no es la 4a. M_F
+  con sobrecorriente se detiene y espera al piloto. Sin calibrar no se mueve nada.
+- Hood guardado en NECTAR con los signos sin cuadrar: arranca sin PWM hasta confirmarlo.
 
 Lo que la simulación **no** prueba: fricción, rebotes, el vuelo de la pelota, la luz del
 campo, lo que lee de verdad un V3 fuera de su eje, ni que el robot real tenga las medidas
