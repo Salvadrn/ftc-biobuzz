@@ -48,8 +48,13 @@ import org.firstinspires.ftc.teamcode.util.FileStateStore;
  *     alta en la que todavía NO la ve es FeederCfg.COPA_UPPER_BLIND_MM.
  *  3. Pelota subiendo hasta la etapa (dpad arriba): la telemetría guarda la distancia mínima.
  *  4. Encoder del elevador (encoder 2): en modo manual, dpad arriba tiene que SUBIR las
- *     cuentas. Mide con regla cuánto sube la superficie de las Gecko por cuenta
- *     (ELEVATOR_MM_PER_TICK, CALC 0.69 mm).
+ *     cuentas. Lo que importa es cuánto avanza LA PELOTA por cuenta, no la rueda (CAD v146:
+ *     entre la mitad y el total de los 0.693 mm de la superficie; las locas van en baleros).
+ *     Con la copa arriba (dpad der. dos veces) y una pelota en ella, anota las cuentas; sube
+ *     a toques con dpad arriba y mide con calibrador la altura del centro desde una
+ *     referencia fija, varias veces, hasta la etapa de arriba: así se incluye el relevo de las
+ *     Gecko de z 95 a las de z 128, donde puede patinar. La pendiente (mm del centro por
+ *     cuenta) va en LIFT_BALL_MM_PER_TICK_NECTAR o _POLLEN: por separado, aprietan distinto.
  *  5. PRUEBA DE BANCO DEL CAD (v146), con el flywheel APAGADO, en modo ciclo: deja que suba
  *     una pelota y mira dónde se queda la de arriba y si se queda, BAJA o SE TREPA (la cuña de
  *     las locas la empuja hacia arriba arriba de z 128). Con NECTAR y con POLLEN, con y sin
