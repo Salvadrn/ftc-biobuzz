@@ -87,8 +87,14 @@ public class Feeder {
     private boolean liftCheck = false;             // falló un rellenado: ¿regresó la pelota a la copa?
     private boolean liftSeen = false;              // el V3 de arriba ya vio la que sube
     private double liftFirstMm, liftMinMm;
+    private long liftAboveSinceNs = -1;            // vista arriba del mínimo + LIFT_PASS_MM desde aquí
+    private long liftLostSinceNs = -1;             // ya vista, sin verla desde aquí
     private long liftPassNs = -1;                  // la distancia ya pasó su mínimo
+    private double liftTravelMm = 0, liftPower = 0;
+    private BallType liftBall = BallType.UNKNOWN;  // la que sube (su tope de recorrido)
+    private String liftCheckWhy = "";
     private String liftTrace = "";                 // cómo terminó la última subida (para calibrar)
+    private long upperEmptySinceNs = -1;           // arriba vacío sin parar desde aquí
 
     // Fila
     private FilaMode filaMode = FilaMode.STOP;
@@ -207,15 +213,23 @@ public class Feeder {
         }
         boolean copaSeated = copaSeatedSinceNs >= 0
                 && (nowNs - copaSeatedSinceNs) / 1e9 >= FeederCfg.COPA_SEATED_S;
+        // Arriba vacío de verdad: sin verla un rato seguido (un parpadeo del V3 no basta)
+        if (upperOccupied) {
+            upperEmptySinceNs = -1;
+        } else if (upperEmptySinceNs < 0) {
+            upperEmptySinceNs = nowNs;
+        }
+        boolean upperEmpty = upperEmptySinceNs >= 0
+                && (nowNs - upperEmptySinceNs) / 1e9 >= FeederCfg.UPPER_EMPTY_CONFIRM_S;
 
         switch (state) {
             case IDLE: {
                 elevator.setPower(0);
                 if (liftCheck && secondsIn(nowNs) >= FeederCfg.LIFT_CHECK_S) {
                     liftCheck = false;
-                    if (!inCopa.isBall() && upperOccupied) {          // sí llegó arriba, pero sin pasar el V3
+                    if (!inCopa.isBall() && upperOccupied) {          // sí llegó arriba, pero no donde debía
                         refillFails = 0;
-                        warning = "la pelota de arriba pudo quedar baja (no pasó el V3 de arriba)";
+                        warning = "la de arriba subió, pero " + liftCheckWhy + ": revisa dónde quedó";
                     } else if (!inCopa.isBall()) {
                         refillBlocked = true;
                         warning = "una pelota se quedó en el tubo entre la copa y arriba";
@@ -229,8 +243,9 @@ public class Feeder {
                     dipNs = -1;
                     upperLostNs = -1;
                     enter(State.FIRING, nowNs);
-                } else if (!upperOccupied && copaSeated && !liftCheck && !refillBlocked && !clearPending) {
+                } else if (upperEmpty && copaSeated && !liftCheck && !refillBlocked && !clearPending) {
                     copaTargetMm = FeederCfg.COPA_TRAVEL_MM;   // la fila se detiene sola al subir la copa
+                    liftBall = inCopa;
                     enter(State.COPA_UP, nowNs);
                 }
                 break;
@@ -273,7 +288,7 @@ public class Feeder {
                 break;
 
             case LIFT:
-                updateLift(nowNs, upperSeen, upperFault);
+                updateLift(nowNs, dt, upperSeen, upperFault);
                 break;
 
             case COPA_DOWN:
@@ -314,43 +329,75 @@ public class Feeder {
     /**
      * Subir la pelota de la copa a su etapa (documento del CAD v138, 4.7): a ELEVATOR_STAGE_POWER
      * hasta que el V3 de arriba la ve; luego a LIFT_SEAT_POWER, siguiendo la distancia hasta que
-     * sube LIFT_PASS_MM sobre su mínimo (el centro ya pasó el lente, z 128), y LIFT_EXTRA_MM más.
+     * sube LIFT_PASS_MM sobre su mínimo (el centro ya pasó el lente, z 128) durante
+     * LIFT_PASS_CONFIRM_S, y LIFT_EXTRA_MM más.
+     *  - Una lectura sin verla no cuenta como subida (puede ser un parpadeo); sin verla
+     *    LIFT_LOST_S seguidos, se detiene.
+     *  - Tope de recorrido estimado (LIFT_MAX_*), por si la distancia nunca marca su mínimo.
+     *  - Lo que no termina bien se revisa con la copa abajo (liftCheck).
      */
-    private void updateLift(long nowNs, boolean upperSeen, boolean upperFault) {
+    private void updateLift(long nowNs, double dt, boolean upperSeen, boolean upperFault) {
+        // Recorrido estimado con la potencia del ciclo anterior (proporcional y sin carga)
+        liftTravelMm += Math.abs(liftPower) / FeederCfg.LIFT_SEAT_POWER * FeederCfg.LIFT_SEAT_MM_S * dt;
         if (upperFault) {                          // sin lectura no se sabe dónde va: se detiene
-            elevator.setPower(0);
-            liftTrace = "V3 de arriba sin lectura a medio subir";
-            endLift(nowNs);
+            stopLift(nowNs, "el V3 de arriba se quedó sin lectura");
             return;
         }
         double d = upperSensor.distanceMm();
-        if (!liftSeen && upperSeen) {
-            liftSeen = true;
-            liftFirstMm = liftMinMm = d;
+        if (!liftSeen) {
+            if (upperSeen) {
+                liftSeen = true;
+                liftFirstMm = liftMinMm = d;
+            }
+        } else if (liftPassNs < 0) {
+            if (upperSeen) {
+                liftLostSinceNs = -1;
+                liftMinMm = Math.min(liftMinMm, d);
+                if (d <= liftMinMm + FeederCfg.LIFT_PASS_MM) {
+                    liftAboveSinceNs = -1;
+                } else if (liftAboveSinceNs < 0) {
+                    liftAboveSinceNs = nowNs;
+                }
+                if (liftAboveSinceNs >= 0 && (nowNs - liftAboveSinceNs) / 1e9 >= FeederCfg.LIFT_PASS_CONFIRM_S) {
+                    liftPassNs = nowNs;
+                }
+            } else if (liftLostSinceNs < 0) {
+                liftLostSinceNs = nowNs;
+            }
         }
-        if (liftSeen && liftPassNs < 0) {
-            liftMinMm = Math.min(liftMinMm, d);
-            if (d > liftMinMm + FeederCfg.LIFT_PASS_MM) liftPassNs = nowNs;
-        }
+        double maxMm = liftBall == BallType.POLLEN ? FeederCfg.LIFT_MAX_POLLEN_MM : FeederCfg.LIFT_MAX_NECTAR_MM;
         double extraS = FeederCfg.LIFT_EXTRA_MM / FeederCfg.LIFT_SEAT_MM_S;
         if (liftPassNs >= 0 && (nowNs - liftPassNs) / 1e9 >= extraS) {
             elevator.setPower(0);
+            liftPower = 0;
             refillFails = 0;
-            liftTrace = String.format("vista a %.1f mm, mínimo %.1f mm, pasó a %.2f s; %.0f mm más",
-                    liftFirstMm, liftMinMm, (liftPassNs - stateStartNs) / 1e9, FeederCfg.LIFT_EXTRA_MM);
+            liftTrace = String.format("vista a %.1f mm, mínimo %.1f mm, pasó a %.2f s; %.0f mm más (%.0f mm en total)",
+                    liftFirstMm, liftMinMm, (liftPassNs - stateStartNs) / 1e9, FeederCfg.LIFT_EXTRA_MM, liftTravelMm);
             endLift(nowNs);
+        } else if (liftLostSinceNs >= 0 && (nowNs - liftLostSinceNs) / 1e9 >= FeederCfg.LIFT_LOST_S) {
+            stopLift(nowNs, "el V3 de arriba la perdió de vista subiendo");
+        } else if (liftTravelMm >= maxMm) {
+            stopLift(nowNs, String.format("llegó al tope de subida (%.0f mm)", maxMm));
         } else if (secondsIn(nowNs) >= FeederCfg.LIFT_TIMEOUT_S) {
             // Vista y sin pasar puede ser que quedó baja o que nunca salió de la copa (con la
-            // copa arriba, una NECTAR se ve a 12.5 mm): con la copa abajo se revisa (liftCheck)
-            elevator.setPower(0);
-            refillFailed(liftSeen ? "la pelota no pasó el V3 de arriba" : "la pelota no subió a la etapa de arriba");
-            liftCheck = true;
-            liftTrace = liftSeen ? String.format("vista a %.1f mm, mínimo %.1f mm, NUNCA pasó", liftFirstMm, liftMinMm)
-                    : "el V3 de arriba nunca la vio";
-            endLift(nowNs);
+            // copa arriba, una NECTAR se ve a 12.5 mm)
+            stopLift(nowNs, liftSeen ? "no pasó el V3 de arriba" : "el V3 de arriba nunca la vio");
         } else {
-            elevator.setPower(liftSeen ? FeederCfg.LIFT_SEAT_POWER : FeederCfg.ELEVATOR_STAGE_POWER);
+            liftPower = liftSeen ? FeederCfg.LIFT_SEAT_POWER : FeederCfg.ELEVATOR_STAGE_POWER;
+            elevator.setPower(liftPower);
         }
+    }
+
+    /** La subida no terminó bien: se detiene, cuenta como falla y se revisa con la copa abajo. */
+    private void stopLift(long nowNs, String why) {
+        elevator.setPower(0);
+        liftPower = 0;
+        refillFailed("subiendo a la etapa de arriba: " + why);
+        liftCheck = true;
+        liftCheckWhy = why;
+        liftTrace = liftSeen ? String.format("vista a %.1f mm, mínimo %.1f mm, %.0f mm recorridos: %s",
+                liftFirstMm, liftMinMm, liftTravelMm, why) : why;
+        endLift(nowNs);
     }
 
     private void endLift(long nowNs) {
@@ -503,6 +550,10 @@ public class Feeder {
         if (s == State.LIFT) {
             liftSeen = false;
             liftPassNs = -1;
+            liftAboveSinceNs = -1;
+            liftLostSinceNs = -1;
+            liftTravelMm = 0;
+            liftPower = 0;
             liftFirstMm = liftMinMm = Double.NaN;
         }
         // Mientras sube la pelota, el V3 de arriba se lee más seguido (fin de LIFT)
