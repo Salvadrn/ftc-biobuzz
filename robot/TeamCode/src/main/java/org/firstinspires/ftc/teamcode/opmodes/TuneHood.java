@@ -18,7 +18,9 @@ import java.util.List;
  *
  * ANTES DE EMPEZAR: si es la primera vez, con el robot apagado deja el hood a mano en
  * POLLEN (eslabón en su tope de POLLEN, hood en su posición normal). El OpMode arranca
- * mandando la posición guardada; la primera vez supone POLLEN.
+ * mandando la posición guardada; la primera vez supone POLLEN. Si quedó guardado fuera de
+ * POLLEN y los signos de Config ya no cuadran, el hood se queda sin PWM: ponlo a mano en
+ * POLLEN y apriétale back para confirmarlo.
  *
  * DÓNDE MEDIR LA LUZ (documento del CAD v138, 4.1). La PUNTA es el canto de arriba de la
  * lámina (θ 55°, por donde sale la pelota); el LABIO es su canto de abajo (θ 0°, junto al
@@ -65,6 +67,8 @@ public class TuneHood extends LinearOpMode {
 
     /** Movimiento corto del gap para probar el sentido, en grados hacia NECTAR. */
     private static final double GAP_JOG_DEG = 2.5;
+    /** La compensación de NECTAR se busca cerca del cálculo (-36.1): los topes están en +0.91° y -35.18°. */
+    private static final double NECTAR_DEG_MIN = -38.0, NECTAR_DEG_MAX = -34.0;
 
     @Override
     public void runOpMode() {
@@ -89,6 +93,12 @@ public class TuneHood extends LinearOpMode {
 
             // Elegir campo no mueve nada
             if (gamepad1.yWasPressed()) field = Field.values()[(field.ordinal() + 1) % Field.values().length];
+            // Hood sin PWM (guardado fuera de POLLEN con los signos sin cuadrar): el operador lo
+            // puso a mano en POLLEN
+            if (gamepad1.backWasPressed() && hood.isFrozen()) {
+                hood.assumeAtPollen(now);
+                gapGoal = HoodCfg.GAP_POLLEN_DEG;
+            }
 
             boolean gapAtPollen = hood.getGapDeg() == HoodCfg.GAP_POLLEN_DEG && gapGoal == HoodCfg.GAP_POLLEN_DEG;
             boolean atNectar = hood.getGapDeg() == HoodCfg.GAP_NECTAR_DEG && gapGoal == HoodCfg.GAP_NECTAR_DEG;
@@ -149,7 +159,11 @@ public class TuneHood extends LinearOpMode {
                     case NECTAR_DEG:
                         if (atNectar && hood.getDeltaDeg() == 0) {
                             double old = HoodCfg.GAP_NECTAR_DEG;
-                            HoodCfg.GAP_NECTAR_DEG = Math.round((old - step / 10.0) * 10) / 10.0;   // + = más negativo = cierra
+                            double next = Math.round((old - step / 10.0) * 10) / 10.0;   // + = más negativo = cierra
+                            HoodCfg.GAP_NECTAR_DEG = Math.max(NECTAR_DEG_MIN, Math.min(NECTAR_DEG_MAX, next));
+                            if (HoodCfg.GAP_NECTAR_DEG != next) {
+                                note = "la compensación de NECTAR va de -38 a -34° (cálculo -36.1): si no alcanza, revisa los µs";
+                            }
                             hood.nectarGapChanged(old);
                             gapGoal = HoodCfg.GAP_NECTAR_DEG;
                             jogGap = HoodCfg.GAP_POLLEN_DEG + Math.signum(HoodCfg.GAP_NECTAR_DEG - HoodCfg.GAP_POLLEN_DEG) * GAP_JOG_DEG;
@@ -190,6 +204,7 @@ public class TuneHood extends LinearOpMode {
             telemetry.addLine(atHome ? "A = cambiar signo   dpad der = signo bien"
                     : "dpad der = signo bien   (el signo solo se cambia en POLLEN con δ 0)");
             if (atJog) telemetry.addLine("Botón del stick derecho = el gap se movió hacia NECTAR sin forzar");
+            if (hood.isFrozen()) telemetry.addLine("Hood SIN PWM: ponlo a mano en POLLEN con δ 0 y aprieta back");
             if (field == Field.NECTAR_DEG) {
                 telemetry.addLine("Compensación NECTAR: dpad ±0.5°, bumpers ±0.1°. Arriba/der. = más negativo = la punta CIERRA");
             }
