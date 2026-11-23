@@ -402,19 +402,23 @@ public final class Config {
         public static double LIFT_SEAT_MM_S = 190;
         /** CALIBRAR: subida sobre el mínimo que dice que el centro ya pasó el lente (CALC: con 1 mm, ~10 mm arriba). */
         public static double LIFT_PASS_MM = 1.0;
-        /** CALIBRAR: lecturas nuevas seguidas, viéndola, arriba del mínimo + LIFT_PASS_MM (contra el ruido). */
-        public static int LIFT_PASS_SAMPLES = 2;
         /**
-         * Ya vista, lecturas nuevas seguidas SIN verla para detenerse: o fue un parpadeo largo o
-         * ya salió del cono del V3 por arriba (con 30°, eso es arriba de z 159: ya en el flywheel).
+         * CALIBRAR contra el ruido del V3: viéndola, la distancia tiene que estar arriba del
+         * mínimo + LIFT_PASS_MM este tiempo seguido (al menos 2 lecturas del V3, que mide cada
+         * 12.5 ms). Una lectura sin verla no cuenta ni en contra ni a favor.
          */
-        public static int LIFT_LOST_SAMPLES = 3;
+        public static double LIFT_PASS_CONFIRM_S = 0.02;
+        /**
+         * Ya vista, este tiempo seguido SIN verla y se detiene: o fue un parpadeo largo o ya
+         * salió del cono del V3 por arriba (con 30°, eso es arriba de z 159: ya en el flywheel).
+         */
+        public static double LIFT_LOST_S = 0.1;
         /**
          * CALC → CALIBRAR. Se cuenta desde que se nota la subida, no desde z 128: el documento
-         * del CAD pide ~17 mm desde el lente (hasta z ~145) y la subida se nota ~10 mm arriba (y
-         * se confirma con LIFT_PASS_SAMPLES lecturas).
+         * del CAD pide ~17 mm desde el lente (hasta z ~145) y la subida se nota ~10 mm arriba
+         * (y se confirma durante LIFT_PASS_CONFIRM_S, ~4 mm más).
          */
-        public static double LIFT_EXTRA_MM = 6;
+        public static double LIFT_EXTRA_MM = 4;
         /**
          * CALC: tope de recorrido de la subida, desde la copa arriba, por si la distancia nunca
          * marca bien su mínimo. Del centro con la copa arriba (z 106.9 NECTAR, 94.9 POLLEN) al
