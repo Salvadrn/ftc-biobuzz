@@ -75,6 +75,7 @@ public class Sim {
         System.out.println("== hood: ley de los dos servos");
         testHood();
         testHoodServoSigns();
+        testHoodFrozenStart();
         testHoodStops();
         System.out.println("== flywheel: caída de rpm = tiro");
         testFlywheelDip();
@@ -91,6 +92,8 @@ public class Sim {
         testFeederCalcDipUnconfirmed();
         System.out.println("== alimentador: V3 de arriba, subida de la copa y fin de LIFT");
         testFeederLiftEnd();
+        testFeederLiftNoise();
+        testFeederTopFlicker();
         testFeederCopaUpOwnBall();
         testFeederNectarStuckInCopa();
         testFeederSeatThird();
@@ -623,6 +626,30 @@ public class Sim {
         }
     }
 
+    static void testHoodFrozenStart() {
+        double savedA = HoodCfg.ANGLE_US_PER_DEG;
+        try {
+            StateStore store = new StateStore.Memory();
+            store.putDouble("hood.gap", HoodCfg.GAP_NECTAR_DEG);   // quedó en NECTAR...
+            store.putDouble("hood.delta", 0);
+            HoodCfg.ANGLE_US_PER_DEG = 1.0 / 0.15;                 // ...y Config ya no cuadra
+            Fakes.PosServo gs = new Fakes.PosServo(), as = new Fakes.PosServo();
+            Hood hood = new Hood(gs.proxy(), as.proxy(), store);
+            long now = 0;
+            hood.start(now);
+            hood.setGapFor(BallType.POLLEN);
+            for (int i = 0; i < 100; i++) { now += 10 * MS; hood.update(now); }
+            check("hood guardado en NECTAR con los signos sin cuadrar: se queda sin PWM y no da listo",
+                    hood.isFrozen() && !gs.everCommanded && !as.everCommanded && !hood.isReady(now), "");
+            hood.assumeAtPollen(now);              // lo pusieron a mano en POLLEN
+            for (int i = 0; i < 100; i++) { now += 10 * MS; hood.update(now); }
+            check("hood: confirmado a mano en POLLEN, vuelve a moverse y queda listo",
+                    !hood.isFrozen() && gs.everCommanded && hood.isReady(now) && hood.getGapDeg() == HoodCfg.GAP_POLLEN_DEG, "");
+        } finally {
+            HoodCfg.ANGLE_US_PER_DEG = savedA;
+        }
+    }
+
     static void testHoodStops() {
         double old = hoodDeltaAtNectarStop(-34.3), calc = hoodDeltaAtNectarStop(-36.1);
         check("hood, topes reales: con GAP_NECTAR_DEG -34.3 el δ real en NECTAR da -1.8°", Math.abs(old + 1.8) < 0.1,
@@ -676,6 +703,9 @@ public class Sim {
         double coneDeg = 30;              // el V3 de arriba ve hasta este ángulo de su eje
         double upperSampleT = -1, upperSampleMm = 200;
         BallType upperSampleType = BallType.NONE;
+        double upperNoiseMm = 0;          // ruido (desviación) de la distancia del V3 de arriba
+        double upperFloorMm = 0;          // el V3 de arriba nunca marca menos que esto (curva más plana)
+        Random noise = new Random(1);
 
         // Fallas a propósito
         double t = 0;
@@ -708,7 +738,8 @@ public class Sim {
                 if (!balls[i].isBall()) continue;
                 double dz = Math.abs(zs[i] - LENS_Z);
                 if (Math.toDegrees(Math.atan2(dz, LENS_TO_AXIS)) > bw.coneDeg) continue;
-                double d = Math.hypot(LENS_TO_AXIS, dz) - radius(balls[i]);
+                double d = Math.max(bw.upperFloorMm, Math.hypot(LENS_TO_AXIS, dz) - radius(balls[i]))
+                        + bw.upperNoiseMm * bw.noise.nextGaussian();
                 if (d < best) {
                     best = d;
                     seen = balls[i];
@@ -1204,6 +1235,73 @@ public class Sim {
                 narrow.bw.hazard ? narrow.bw.hazardWhy : "sin choque");
     }
 
+    /** La de la copa sube a su etapa con el V3 de arriba ruidoso o con un parpadeo al empezar. */
+    static FeederRig liftRig(double noiseMm, long seed, double floorMm, double dropoutS) {
+        FeederRig r = new FeederRig();
+        r.bw.copa = BallType.NECTAR_RED;
+        r.bw.fila = BallType.NECTAR_RED;
+        r.bw.upperNoiseMm = noiseMm;
+        r.bw.upperFloorMm = floorMm;
+        r.bw.noise = new Random(seed);
+        boolean dropoutSet = false;
+        for (int i = 0; i < 400; i++) {
+            r.step(false, true);
+            if (!dropoutSet && dropoutS > 0 && r.f.getState() == Feeder.State.LIFT) {
+                r.bw.flickerFromS = r.bw.t;           // deja de verla justo al empezar a subir
+                r.bw.flickerToS = r.bw.t + dropoutS;
+                dropoutSet = true;
+            }
+        }
+        return r;
+    }
+
+    static boolean stagedInWindow(FeederRig r) {
+        double z = r.bw.upperZOrDefault();
+        return r.bw.upper == BallType.NECTAR_RED && !r.bw.hazard
+                && z >= copaCenterZ(BallType.NECTAR_RED, 0) + 2 * radius(BallType.NECTAR_RED) && z < 156.5;
+    }
+
+    static int liftOutOfWindow(double sigma, String[] worst) {
+        int bad = 0;
+        for (long seed = 1; seed <= 30; seed++) {
+            FeederRig r = liftRig(sigma, seed, 0, 0);
+            if (!stagedInWindow(r)) {
+                bad++;
+                worst[0] = String.format("semilla %d: z %.1f %s", seed, r.bw.upperZOrDefault(), r.bw.hazardWhy);
+            }
+        }
+        return bad;
+    }
+
+    static void testFeederLiftNoise() {
+        String[] worst = {""};
+        int bad = liftOutOfWindow(0.3, worst);
+        check("fin de LIFT con ruido de 0.3 mm en el V3 de arriba: la de arriba en su ventana (30 intentos)",
+                bad == 0, bad + " de 30 fuera " + worst[0]);
+        int bad5 = liftOutOfWindow(0.5, worst);
+        System.out.printf("      (referencia, ruido de 0.5 mm: %d de 30 fuera de la ventana; si el V3 es así de ruidoso,"
+                + " subir LIFT_AVG_SAMPLES y bajar LIFT_EXTRA_MM)%n", bad5);
+        FeederRig d = liftRig(0, 1, 0, 0.03);
+        check("fin de LIFT: un parpadeo de 30 ms al empezar a subir no la deja baja", stagedInWindow(d),
+                String.format("z %.1f; %s", d.bw.upperZOrDefault(), d.f.liftTrace()));
+        FeederRig flat = liftRig(0, 1, 11, 0);   // la distancia nunca baja de 11 mm (8.5 en el lente)
+        check("fin de LIFT con una curva más plana: el tope de recorrido no la deja tocar el flywheel",
+                !flat.bw.hazardWhy.contains("flywheel") && flat.bw.upper == BallType.NECTAR_RED,
+                String.format("z %.1f; %s", flat.bw.upperZOrDefault(), flat.f.liftTrace()));
+    }
+
+    static void testFeederTopFlicker() {
+        FeederRig r = new FeederRig();
+        r.bw.upper = BallType.NECTAR_RED;         // la de arriba ya en su etapa (z 150)
+        r.bw.copa = BallType.NECTAR_RED;
+        for (int i = 0; i < 50; i++) r.step(false, true);
+        r.bw.flickerFromS = r.bw.t;               // el V3 de arriba no la ve 100 ms
+        r.bw.flickerToS = r.bw.t + 0.10;
+        for (int i = 0; i < 100; i++) r.step(false, true);
+        check("un parpadeo de 100 ms del V3 de arriba no sube la copa contra la de arriba",
+                r.bw.maxCopaMm < 1 && !r.bw.hazard, String.format("copa hasta %.1f mm %s", r.bw.maxCopaMm, r.bw.hazardWhy));
+    }
+
     static void testFeederCopaUpOwnBall() {
         FeederRig r = new FeederRig();
         r.bw.coneDeg = 45;                        // ve la NECTAR de la copa desde ~21 mm de subida
@@ -1588,13 +1686,14 @@ public class Sim {
         final BallInventory inv = new BallInventory();
         int stages = 3;                           // arriba, copa y fila ocupadas
         boolean accepting = false;                // con la fila ocupada, la fila no jala
+        boolean filaBall = true;                  // BB3
         long now = 0;
         boolean full;
 
         void step() {
             now += 10 * MS;
             full = inv.isFull(stages, in.hasBallAtEntry());
-            in.update(now, full, accepting);
+            in.update(now, full, accepting, filaBall);
             for (int k = in.consumeEntered(); k > 0; k--) inv.entered();
             for (int k = in.consumeRejected(); k > 0; k--) inv.left();
             inv.reconcile(stages);
@@ -1628,6 +1727,40 @@ public class Sim {
                         && reverses == 0 && r.inv.count() == 3,
                 String.format("lleno a %.2f s, %d reversas, cuenta %d", fullAt, reverses, r.inv.count()));
 
+        EntryRig k = new EntryRig();              // la fila no sabe del intake: FULL_MOUTH_S < UNJAM_MOUTH_S
+        k.inv.set(3);
+        k.accepting = true;
+        k.in.setCommand(Intake.Command.IN);
+        for (int i = 0; i < 150; i++) k.step();
+        k.mouth[0] = true;
+        int kRev = 0;
+        for (int i = 0; i < 100; i++) {
+            k.step();
+            if (k.m.power < 0) kRev++;
+        }
+        check("4a en la boca aunque la fila parezca jalar: LLENO antes de la regla de atasco",
+                k.full && k.m.power == 0 && kRev == 0, kRev + " ciclos en reversa");
+
+        EntryRig s = new EntryRig();              // la 3a NECTAR sin asentar corta la garganta
+        s.inv.set(2);
+        s.stages = 2;
+        s.filaBall = false;
+        s.accepting = true;
+        s.in.setCommand(Intake.Command.IN);
+        for (int i = 0; i < 150; i++) s.step();
+        s.throat[0] = true;                       // la 3a cruza la garganta y se cuenta...
+        for (int i = 0; i < 10; i++) s.step();
+        s.stages = 3;                             // ...llega a BB3 y la fila se para: sigue en el haz
+        s.filaBall = true;
+        s.accepting = false;
+        boolean stopped = false;
+        for (int i = 0; i < 150; i++) {
+            s.step();
+            if (i > 120 && (s.full || s.m.power <= 0)) stopped = true;
+        }
+        check("la 3a sin asentar cortando la garganta no es la 4a: sigue jalando", !stopped && s.inv.count() == 3,
+                "lleno " + s.full + ", M_F " + s.m.power);
+
         boolean leftFull = false;                 // variante: corta la garganta a ratos (NECTAR a ~1-2 mm)
         for (int i = 0; i < 200; i++) {
             r.throat[0] = (i % 13) < 4;
@@ -1645,15 +1778,18 @@ public class Sim {
         wasRev = false;
         boolean pushed = false;
         for (int i = 0; i < 150; i++) {
+            r.throat[0] = (i % 13) < 4;           // y corta la garganta a ratos mientras espera
             r.step();
             boolean rev = r.m.power < 0;
             if (rev && !wasRev) reverses++;
             wasRev = rev;
             if (r.m.power > 0) pushed = true;
         }
-        check("con lugar pero la fila sin jalar, la 4a espera en la boca: M_F en BRAKE y sin reversas",
-                !pushed && reverses == 0 && !r.in.warning().startsWith("atasco"),
-                reverses + " reversas, aviso '" + r.in.warning() + "'");
+        r.throat[0] = false;
+        r.step();
+        check("con lugar pero la fila sin jalar, la 4a espera: M_F en BRAKE, sin reversas ni cuentas de más",
+                !pushed && reverses == 0 && !r.in.warning().startsWith("atasco") && r.inv.count() == 2,
+                reverses + " reversas, cuenta " + r.inv.count() + ", aviso '" + r.in.warning() + "'");
         r.accepting = true;                       // la fila carga la copa y jala la siguiente
         r.step();
         r.step();
@@ -1672,6 +1808,8 @@ public class Sim {
         Fakes.Motor m = new Fakes.Motor();
         Fakes.PosServo sv = new Fakes.PosServo();
         IntakeLengua in = lengua(m, sv, new boolean[]{false}, seen);
+        check("M_F: el límite de corriente del hub se pone en MF_CURRENT_LIMIT_A",
+                m.currentAlertA == IntakeLenguaCfg.MF_CURRENT_LIMIT_A, m.currentAlertA + " A");
         long now = warmUp(in, 0);
         double posDown = sv.position;
         m.overCurrent = true;                     // atasco: M_F arriba de MF_CURRENT_LIMIT_A
