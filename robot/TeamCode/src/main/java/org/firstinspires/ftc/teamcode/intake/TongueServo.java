@@ -8,13 +8,15 @@ import org.firstinspires.ftc.teamcode.Config.IntakeLenguaCfg;
 
 /**
  * Servo 2000-0025-0002 que pliega y despliega la lengua del intake con manivela y biela
- * (CAD v139, calculado; el sentido del PWM no está verificado).
+ * (CAD v107-v118; secuencia del plan de la lengua, plan_lengua_final.json, A/decisiones[11]).
+ * Los µs son de cálculo hasta pasar por "Tune: Lengua" (IntakeLenguaCfg.CALIBRATED).
  *
  * El servo no dice dónde está: se estima suponiendo que va a SERVO_DEG_S (pesimista).
  *
  *  - Plegar: directo a plegada. La manivela sube la lengua con la biela tensa; pasada la
  *    vertical, la lengua se va sola unos 5° hasta su tope y ahí descansa por su peso, sin
- *    carga en el servo: entonces se apaga el PWM.
+ *    carga en el servo: entonces se apaga el PWM (nunca se deja suelta en una posición
+ *    intermedia: entre plegada y el empuje la lengua queda libre).
  *  - Desplegar, en dos tramos:
  *     1. rápido de plegada a "empuje": en esos 77° de manivela la lengua no se mueve (el
  *        perno corre en la ranura de la biela);
@@ -40,6 +42,7 @@ public class TongueServo {
     private Phase phase = Phase.STILL;
     private double cmdUs = Double.NaN;        // lo que se le manda
     private double estUs = Double.NaN;        // dónde se cree que va
+    private double rampEndUs = Double.NaN;    // dónde termina la rampa (DOWN_US, o antes en "Tune: Lengua")
     private boolean pwmOn = true;
     private long lastNs = 0;
     private long stillSinceNs = 0;
@@ -64,9 +67,24 @@ public class TongueServo {
     /** Rápido hasta el empuje y de ahí en rampa hasta abajo. */
     public void deploy(long nowNs) {
         if (target == Position.DOWN) return;
-        if (Double.isNaN(estUs)) estUs = IntakeLenguaCfg.FOLDED_US;   // al empezar está plegada (R102)
+        startDeploy(IntakeLenguaCfg.DOWN_US, nowNs);
         manual = false;
         target = Position.DOWN;
+    }
+
+    /**
+     * Solo para "Tune: Lengua": la misma secuencia de desplegar, pero la rampa termina en
+     * endUs (la primera vez, 100 µs antes de DOWN_US, para buscar el despegue).
+     */
+    public void deployForTuning(double endUs, long nowNs) {
+        startDeploy(endUs, nowNs);
+        target = null;
+        manual = true;
+    }
+
+    private void startDeploy(double endUs, long nowNs) {
+        if (Double.isNaN(estUs)) estUs = IntakeLenguaCfg.FOLDED_US;   // al empezar está plegada (R102)
+        rampEndUs = endUs;
         phase = Phase.TO_PUSH;
         command(IntakeLenguaCfg.PUSH_US, nowNs);
     }
@@ -84,8 +102,8 @@ public class TongueServo {
         if (phase == Phase.TO_PUSH && Math.abs(estUs - cmdUs) <= 0.5) phase = Phase.RAMP;
         if (phase == Phase.RAMP) {
             double rampStep = IntakeLenguaCfg.DEPLOY_RAMP_DEG_S / DEG_PER_US * dt;
-            double next = cmdUs + Range.clip(IntakeLenguaCfg.DOWN_US - cmdUs, -rampStep, rampStep);
-            if (next == IntakeLenguaCfg.DOWN_US) phase = Phase.STILL;
+            double next = cmdUs + Range.clip(rampEndUs - cmdUs, -rampStep, rampStep);
+            if (next == rampEndUs) phase = Phase.STILL;
             command(next, nowNs);
         }
 
@@ -145,10 +163,10 @@ public class TongueServo {
     }
 
     public String describe() {
-        if (manual) return String.format("a mano (%.0f µs%s)", cmdUs, pwmOn ? "" : ", suelta");
-        if (target == null) return "sin mandar";
         String what = phase == Phase.TO_PUSH ? "yendo al empuje" : phase == Phase.RAMP ? "bajando en rampa"
                 : isSettled() ? "quieta" : "moviéndose";
+        if (manual) return String.format("a mano, %s (%.0f µs%s)", what, cmdUs, pwmOn ? "" : ", suelta");
+        if (target == null) return "sin mandar";
         return String.format("%s %s (%.0f µs%s)", target, what, cmdUs, pwmOn ? "" : ", suelta");
     }
 }
