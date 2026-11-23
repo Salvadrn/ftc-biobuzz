@@ -16,7 +16,8 @@ import org.firstinspires.ftc.teamcode.util.ColorClassifier;
 public class BallSensor {
     private final ColorReader reader;
     private final ColorClassifier.Thresholds thresholds;
-    private final long minIntervalNs;
+    private final long normalIntervalNs;
+    private long minIntervalNs;
 
     private final double[] raw = new double[4];
     private long lastReadNs = Long.MIN_VALUE / 2;
@@ -26,7 +27,16 @@ public class BallSensor {
     public BallSensor(ColorReader reader, ColorClassifier.Thresholds thresholds, double minIntervalS) {
         this.reader = reader;
         this.thresholds = thresholds;
-        this.minIntervalNs = (long) (minIntervalS * 1e9);
+        this.normalIntervalNs = (long) (minIntervalS * 1e9);
+        this.minIntervalNs = normalIntervalNs;
+    }
+
+    /**
+     * Leer más seguido por un rato (el V3 de arriba mientras sube una pelota) o, con NaN,
+     * regresar al intervalo normal.
+     */
+    public void setMinIntervalS(double s) {
+        minIntervalNs = Double.isNaN(s) ? normalIntervalNs : (long) (s * 1e9);
     }
 
     /** Lee si ya toca; si no, regresa lo último. Con falla regresa UNKNOWN. */
@@ -42,6 +52,9 @@ public class BallSensor {
     public BallType last() { return last; }
     public boolean hasBall() { return last.isBall(); }
     public boolean isFault() { return fault; }
+
+    /** Distancia de la última lectura, en mm (NaN con falla). */
+    public double distanceMm() { return fault ? Double.NaN : raw[3]; }
 
     /** Algún canal saturado: el color no es confiable (bajar COLOR_GAIN). */
     public boolean isSaturated() {
