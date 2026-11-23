@@ -28,10 +28,11 @@ import java.util.List;
  * tope. "Hacia abajo" es el sentido de FOLDED_US a DOWN_US: dpad y bumpers mueven siempre en
  * ese sentido (arriba / derecho) o en el contrario (abajo / izquierdo).
  *
- *  0. CALADO. dpad izquierdo manda SPLINE_SET_US (1500) fijo. Con la lengua plegada a mano
- *     contra su tope de atrás, mete la manivela en el diente (o diente + cara del REX: 150
- *     posiciones cada 2.4°) más cercano a "hacia atrás, 48° abajo de la horizontal". Si la
- *     lengua no asienta en su tope, la manivela quedó más de 2.35° hacia abajo: usa otra.
+ *  0. CALADO. dpad izquierdo manda SPLINE_SET_US (1500) fijo y borra las marcas (si se cala
+ *     otro diente, las viejas ya no valen). Con la lengua plegada a mano contra su tope de
+ *     atrás, mete la manivela en el diente (o diente + cara del REX: 150 posiciones cada
+ *     2.4°) más cercano a "hacia atrás, 48° abajo de la horizontal". Si la lengua no asienta
+ *     en su tope, la manivela quedó más de 2.35° hacia abajo: usa otra.
  *  1. SENTIDO. Desde el calado, dpad arriba (5 µs hacia abajo) un par de veces: la manivela
  *     tiene que BAJAR (girar hacia el frente). Si sube, el sentido está al revés: el botón del
  *     stick izquierdo refleja los tres valores alrededor de SPLINE_SET_US y regresa al calado.
@@ -63,7 +64,11 @@ import java.util.List;
  *  7. Copia los µs a IntakeLenguaCfg y pon CALIBRATED = true. Sin eso el TeleOp no mueve la
  *     lengua ni M_F.
  *
- * Ya marcado un valor, los bumpers y el dpad lo ajustan en vivo donde está la lengua.
+ * Ya marcado un valor, los bumpers y el dpad lo ajustan en vivo donde está la lengua. Los
+ * pasos chicos y las marcas no pasan de abajo + 15 µs ni de plegada - 20 µs (con el empuje
+ * marcado). A, el calado y Y (soltar) solo con la lengua plegada en su tope o abajo: nunca
+ * mientras el paso 4 la sostiene antes de la vertical. M_F se corta igual que en el robot
+ * (MF_CURRENT_LIMIT_A por MF_OVERCURRENT_S) hasta soltar el gatillo.
  * Criterios (CALC, no dependen del calado): PUSH_US - FOLDED_US ≈ 514, DOWN_US - PUSH_US ≈ 482
  * y el error de calado dentro de ±48 µs (±8 con el REX).
  */
@@ -104,20 +109,31 @@ public class TuneLengua extends LinearOpMode {
         boolean pushMarked = false, downMarked = false, foldedMarked = false;
         String note = "";
         double lastMotor = Double.NaN;
+        long overSinceNs = -1;
+        boolean mfCut = false;           // M_F cortado por sobrecorriente hasta soltar los gatillos
         while (opModeIsActive()) {
             long now = System.nanoTime();
             // Sentido de abajo en µs: +1 con la ficha vista desde el estriado, -1 reflejado
             double down = IntakeLenguaCfg.DOWN_US >= IntakeLenguaCfg.FOLDED_US ? 1 : -1;
+            // Plegada y recargada en su tope de atrás: al empezar (a mano), en el calado o el
+            // empuje, o ya con la plegada marcada. NO cuando el paso 4 la sostiene antes de la
+            // vertical con la biela tensa: un salto rápido abriría la ranura y la dejaría caer.
+            boolean foldedAtStop = field == null || field == Field.PUSH || (field == Field.FOLDED && foldedMarked);
 
-            // 0. Calado
+            // 0. Calado (vuelve a empezar: las marcas viejas no valen si se cala otro diente)
             if (gamepad1.dpadLeftWasPressed()) {
                 if (field == Field.DOWN) {
-                    note = "el calado es con la lengua plegada: X primero";
+                    note = "el calado es con la lengua plegada: pliégala primero (X, paso 4)";
+                } else if (!foldedAtStop) {
+                    note = "primero termina de plegar: B cuando pase la vertical (paso 4)";
+                } else if (field != null && !tongue.isSettled()) {
+                    note = "espera a que llegue";
                 } else {
                     us = IntakeLenguaCfg.SPLINE_SET_US;
                     tongue.manual(us, now);
                     field = Field.PUSH;
-                    note = "";
+                    pushMarked = downMarked = foldedMarked = false;
+                    note = "en el calado: las marcas se borraron, vuelve a marcar el empuje (paso 2)";
                 }
             }
 
@@ -143,6 +159,10 @@ public class TuneLengua extends LinearOpMode {
                     note = "marca primero el empuje (paso 2): el salto rápido va hasta PUSH_US";
                 } else if (field == Field.DOWN) {
                     note = "ya está abajo";
+                } else if (!foldedAtStop) {
+                    note = "primero termina de plegar (B en la vertical) o bájala en pasos (dpad arriba)";
+                } else if (!tongue.isSettled()) {
+                    note = "espera a que llegue";
                 } else {
                     if (downMarked) {
                         us = IntakeLenguaCfg.DOWN_US;
@@ -172,7 +192,13 @@ public class TuneLengua extends LinearOpMode {
                     note = "";
                 }
             }
-            if (gamepad1.yWasPressed()) tongue.release();
+            if (gamepad1.yWasPressed()) {
+                if (field == Field.DOWN || foldedAtStop) {
+                    tongue.release();
+                } else {
+                    note = "soltarla aquí la dejaría caer: termina de plegar (B) o bájala en pasos";
+                }
+            }
 
             // Pasos chicos desde donde está: + = hacia abajo
             double step = 0;
@@ -203,8 +229,10 @@ public class TuneLengua extends LinearOpMode {
                 }
             }
 
-            // Marcar
+            // Marcar (con los mismos límites que los pasos chicos)
             if (gamepad1.bWasPressed()) {
+                double maxDown = IntakeLenguaCfg.PUSH_US + down * (PUSH_TO_DOWN_US + DOWN_BEYOND_US);
+                double maxFold = IntakeLenguaCfg.PUSH_US - down * (FOLD_TO_PUSH_US + FOLDED_BEYOND_US);
                 if (field == null) {
                     note = "primero el calado (dpad izquierdo)";
                 } else if (!tongue.isSettled()) {
@@ -216,21 +244,27 @@ public class TuneLengua extends LinearOpMode {
                     pushMarked = true;
                     note = "empuje marcado; plegada y abajo recorridas con las diferencias de cálculo";
                 } else if (field == Field.DOWN) {
+                    double mark = us + down * LIFTOFF_TO_DOWN_US;
                     if (downMarked) {
                         note = "abajo ya está marcado: ajústalo con los bumpers";
+                    } else if (down * (mark - maxDown) > 0) {
+                        note = "despegue + 46 pasaría de abajo + 15 µs: ¿la cola ya tocaba antes? sube y búscalo otra vez";
                     } else {
-                        IntakeLenguaCfg.DOWN_US = us + down * LIFTOFF_TO_DOWN_US;
-                        us = IntakeLenguaCfg.DOWN_US;
+                        IntakeLenguaCfg.DOWN_US = mark;
+                        us = mark;
                         tongue.manual(us, now);
                         downMarked = true;
                         note = "abajo = despegue + 46 µs";
                     }
                 } else {
+                    double mark = us - down * VERTICAL_TO_FOLDED_US;
                     if (foldedMarked) {
                         note = "plegada ya está marcada: ajústala con los bumpers";
+                    } else if (down * (maxFold - mark) > 0) {
+                        note = "vertical + 47 pasaría del punto muerto: ¿ya había caído antes? bájala y acércate otra vez";
                     } else {
-                        IntakeLenguaCfg.FOLDED_US = us - down * VERTICAL_TO_FOLDED_US;
-                        us = IntakeLenguaCfg.FOLDED_US;
+                        IntakeLenguaCfg.FOLDED_US = mark;
+                        us = mark;
                         tongue.manual(us, now);
                         foldedMarked = true;
                         note = "plegada = vertical + 47 µs. A mano: la punta avanza ~4 mm y se traba";
@@ -239,13 +273,29 @@ public class TuneLengua extends LinearOpMode {
             }
             tongue.update(now);
 
-            // 5. M_F, solo con la lengua abajo
+            // 5. M_F, solo con la lengua abajo, y con el mismo corte por sobrecorriente del robot
             double m = 0;
             if (gamepad1.right_trigger > 0.3) m = IntakeLenguaCfg.IN_POWER;
             if (gamepad1.left_trigger > 0.3) m = -IntakeLenguaCfg.IN_POWER;
+            if (m == 0) mfCut = false;                      // soltó los gatillos: se rearma
             if (m != 0 && field != Field.DOWN) {
                 m = 0;
                 note = "M_F solo con la lengua abajo (paso 3)";
+            }
+            boolean over = lastMotor != 0 && !Double.isNaN(lastMotor) && motor.isOverCurrent();
+            if (!over) {
+                overSinceNs = -1;
+            } else if (overSinceNs < 0) {
+                overSinceNs = now;
+            }
+            if (overSinceNs >= 0 && (now - overSinceNs) / 1e9 >= IntakeLenguaCfg.MF_OVERCURRENT_S) {
+                mfCut = true;
+                overSinceNs = -1;
+            }
+            if (mfCut) {
+                m = 0;
+                note = String.format("M_F cortado: más de %.1f A por %.1f s. Suelta el gatillo",
+                        IntakeLenguaCfg.MF_CURRENT_LIMIT_A, IntakeLenguaCfg.MF_OVERCURRENT_S);
             }
             if (m != lastMotor) {
                 motor.setPower(m);
