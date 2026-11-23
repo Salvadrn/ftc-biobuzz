@@ -378,11 +378,20 @@ public final class Config {
          */
         public static boolean ELEVATOR_REVERSED = false;   // CALIBRAR: + tiene que subir
         /**
-         * CALC → MEDIR: mm que avanza la superficie de las Gecko de 32 mm (100.5 mm por vuelta)
-         * por cuenta del encoder del elevador (145.1 cuentas por vuelta de salida, 1:1). El
-         * encoder va a la Expansion Hub, encoder 2 (CAD v146: cable 3801-0709-0600).
+         * CAD v146: mm que avanza la SUPERFICIE de las Gecko motrices de Ø32 por cuenta del
+         * encoder del elevador (145.1 cuentas por vuelta; motor, columna y Gecko 1:1:1). El
+         * encoder va a la Expansion Hub, encoder 2 (cable 3801-0709-0600).
          */
-        public static double ELEVATOR_MM_PER_TICK = 100.5 / 145.1;
+        public static double ELEVATOR_MM_PER_TICK = Math.PI * 32 / 145.1;
+        /**
+         * MEDIR en "Tune: Alimentador": mm que avanza el CENTRO DE LA PELOTA por cuenta, por
+         * separado NECTAR y POLLEN (aprietan distinto). Del otro lado van locas en baleros, así
+         * que la pelota avanza entre la mitad y el total de la superficie, y la Gecko apretada
+         * rueda con un radio algo menor (CAD v146). De arranque, igual a la superficie: si la
+         * pelota es más lenta, el robot cree que subió más y la deja MÁS BAJA, nunca más alta.
+         */
+        public static double LIFT_BALL_MM_PER_TICK_NECTAR = Math.PI * 32 / 145.1;
+        public static double LIFT_BALL_MM_PER_TICK_POLLEN = Math.PI * 32 / 145.1;
         /** CALC: centro de la pelota con la copa arriba (54 mm), de donde arranca la subida. */
         public static double LIFT_START_Z_NECTAR = 106.9;
         public static double LIFT_START_Z_POLLEN = 94.9;
