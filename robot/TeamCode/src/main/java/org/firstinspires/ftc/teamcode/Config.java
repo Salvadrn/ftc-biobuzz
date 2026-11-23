@@ -402,13 +402,34 @@ public final class Config {
         public static double LIFT_SEAT_MM_S = 190;
         /** CALIBRAR: subida sobre el mínimo que dice que el centro ya pasó el lente (CALC: con 1 mm, ~10 mm arriba). */
         public static double LIFT_PASS_MM = 1.0;
+        /** CALIBRAR: lecturas nuevas seguidas, viéndola, arriba del mínimo + LIFT_PASS_MM (contra el ruido). */
+        public static int LIFT_PASS_SAMPLES = 2;
+        /**
+         * Ya vista, lecturas nuevas seguidas SIN verla para detenerse: o fue un parpadeo largo o
+         * ya salió del cono del V3 por arriba (con 30°, eso es arriba de z 159: ya en el flywheel).
+         */
+        public static int LIFT_LOST_SAMPLES = 3;
         /**
          * CALC → CALIBRAR. Se cuenta desde que se nota la subida, no desde z 128: el documento
-         * del CAD pide ~17 mm desde el lente (hasta z ~145) y la subida se nota ~10 mm arriba.
+         * del CAD pide ~17 mm desde el lente (hasta z ~145) y la subida se nota ~10 mm arriba (y
+         * se confirma con LIFT_PASS_SAMPLES lecturas).
          */
-        public static double LIFT_EXTRA_MM = 8;
+        public static double LIFT_EXTRA_MM = 6;
+        /**
+         * CALC: tope de recorrido de la subida, desde la copa arriba, por si la distancia nunca
+         * marca bien su mínimo. Del centro con la copa arriba (z 106.9 NECTAR, 94.9 POLLEN) al
+         * contacto con el flywheel (156.5 y 170.8), menos ~3 mm. El recorrido se estima con la
+         * potencia y LIFT_SEAT_MM_S (sin carga): si el elevador real es más lento, para más abajo.
+         */
+        public static double LIFT_MAX_NECTAR_MM = 47;
+        public static double LIFT_MAX_POLLEN_MM = 72;
         /** Cada cuánto se lee el V3 de arriba mientras sube la pelota (0 = cada ciclo). */
         public static double LIFT_READ_INTERVAL_S = 0.0;
+        /**
+         * CALIBRAR: arriba tiene que verse vacío este tiempo seguido antes de subir la copa. Un
+         * parpadeo del V3 (en un tiro se ven de 60 ms) no basta para subirla contra la de arriba.
+         */
+        public static double UPPER_EMPTY_CONFIRM_S = 0.2;
 
         /**
          * MEDIR en "Tune: Alimentador": altura de la copa hasta la que el V3 de arriba todavía
@@ -423,7 +444,8 @@ public final class Config {
         /**
          * CALC → CALIBRAR: con la copa ocupada la fila se detiene en el primer corte de BB3, con
          * la 3a a 28-33 mm de su lugar del CAD (y -112). Sigue esto más para asentarla
-         * (~0.23 m/s). 0 = no.
+         * (~0.23 m/s). Sin asentar, una NECTAR se queda cortando el haz de la garganta (centro
+         * en y -145; el haz la ve hasta -139), y la 4a no tendría dónde quedarse.
          */
         public static double FILA_SEAT_S = 0.12;
 
@@ -529,9 +551,11 @@ public final class Config {
 
         /**
          * CALIBRAR (documento del CAD v138, 4.5). Con arriba, copa y fila ocupadas, la 4a se
-         * queda en la boca sin cortar el haz de la garganta (le faltan 7-24 mm) y corta BB1:
-         * una pelota en BB1 de forma continua esto es la 4a y el robot está LLENO. Tiene que
-         * ser menor que UNJAM_MOUTH_S (con las 3 etapas ocupadas, además, BB1 no es atasco).
+         * queda en la boca sin cortar el haz de la garganta (le faltan 7-24 mm) y corta BB1 en
+         * todos los casos (11-19 mm): una pelota en BB1 de forma continua esto es la 4a y el
+         * robot está LLENO. Solo BB1: el haz de la garganta lo puede estar cortando la 3a misma
+         * (una NECTAR sin asentar). Menor que UNJAM_MOUTH_S, y además, con la fila sin jalar,
+         * una pelota en BB1 espera: no es atasco.
          */
         public static double FULL_MOUTH_S = 0.2;
 
