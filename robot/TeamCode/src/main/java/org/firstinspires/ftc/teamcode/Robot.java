@@ -176,9 +176,12 @@ public class Robot {
         inventory.reconcile(feeder.sensedBalls());
     }
 
-    /** Arriba, copa y fila tienen pelota (o un sensor sin lectura). */
-    public boolean stagesFull() {
-        return feeder.sensedBalls() >= BallInventory.MAX_BALLS - 1;
+    /**
+     * Llamar una vez por ciclo, después de setCommand: el intake con el "lleno" de G407 y
+     * sabiendo si la fila puede recibir la siguiente pelota.
+     */
+    public void updateIntake(long nowNs) {
+        intake.update(nowNs, isFull(), feeder.isFilaPullingIn());
     }
 
     /**
