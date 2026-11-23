@@ -86,7 +86,7 @@ public class Feeder {
     private boolean refillBlocked = false;
     private boolean liftCheck = false;             // falló un rellenado: ¿regresó la pelota a la copa?
     private boolean liftSeen = false;              // el V3 de arriba ya vio la que sube
-    private double liftFirstMm, liftMinMm;
+    private double liftFirstMm, liftMinMm, liftLastAvgMm;
     private long liftAboveSinceNs = -1;            // vista arriba del mínimo + LIFT_PASS_MM desde aquí
     private long liftLostSinceNs = -1;             // ya vista, sin verla desde aquí
     private long liftPassNs = -1;                  // la distancia ya pasó su mínimo
@@ -366,12 +366,13 @@ public class Feeder {
                 liftFirstMm = d;
                 liftWin = new double[Math.max(1, FeederCfg.LIFT_AVG_SAMPLES)];
                 liftWinN = liftWinI = 0;
-                liftMinMm = average(d);
+                liftMinMm = liftLastAvgMm = average(d);
             }
-        } else if (liftPassNs < 0) {
-            if (upperSeen) {
-                liftLostSinceNs = -1;
-                double avg = average(d);
+        } else if (upperSeen) {
+            liftLostSinceNs = -1;
+            double avg = average(d);
+            liftLastAvgMm = avg;
+            if (liftPassNs < 0) {
                 liftMinMm = Math.min(liftMinMm, avg);
                 double pass = liftBall == BallType.POLLEN ? FeederCfg.LIFT_PASS_POLLEN_MM : FeederCfg.LIFT_PASS_MM;
                 if (avg <= liftMinMm + pass) {
@@ -382,15 +383,15 @@ public class Feeder {
                 if (liftAboveSinceNs >= 0 && (nowNs - liftAboveSinceNs) / 1e9 >= FeederCfg.LIFT_PASS_CONFIRM_S) {
                     liftPassNs = nowNs;
                 }
-            } else if (liftLostSinceNs < 0) {
-                liftLostSinceNs = nowNs;
             }
+        } else if (liftLostSinceNs < 0) {
+            liftLostSinceNs = nowNs;
         }
         // Con encoder: la altura del centro desde la copa arriba, y la meta según la pelota
         int ticks = elevator.getCurrentPosition() - liftStartTicks;
         boolean pollen = liftBall == BallType.POLLEN;
         double zEnc = (pollen ? FeederCfg.LIFT_START_Z_POLLEN : FeederCfg.LIFT_START_Z_NECTAR)
-                + ticks * FeederCfg.ELEVATOR_MM_PER_TICK;
+                + ticks * ballMmPerTick();
         double target = pollen ? FeederCfg.LIFT_TARGET_Z_POLLEN : FeederCfg.LIFT_TARGET_Z_NECTAR;
         boolean byEncoder = FeederCfg.LIFT_BY_ENCODER && elevatorEncoderOk;
         if (byEncoder && liftTravelMm >= FeederCfg.ENCODER_CHECK_MM && ticks < FeederCfg.ENCODER_MIN_TICKS) {
@@ -439,17 +440,25 @@ public class Feeder {
         }
     }
 
+    /** mm que avanza el centro de la pelota que sube por cuenta del encoder (MEDIR por tipo). */
+    private double ballMmPerTick() {
+        return liftBall == BallType.POLLEN ? FeederCfg.LIFT_BALL_MM_PER_TICK_POLLEN : FeederCfg.LIFT_BALL_MM_PER_TICK_NECTAR;
+    }
+
     /**
      * Cuánto subió, para la prueba de banco: lo estimado con la potencia y, si el encoder del
-     * elevador está conectado (encoder 2), lo que dice el encoder y la altura del centro que da.
+     * elevador está conectado (encoder 2), lo que dice el encoder y la altura del centro que da,
+     * más lo que leía el V3 al parar (con la meta de NECTAR, ~2.7 mm sobre su mínimo; POLLEN,
+     * ~1.3): si casi no había subido del mínimo, la pelota va más lenta que las Gecko.
      */
     private String liftTravel() {
         int ticks = elevator.getCurrentPosition() - liftStartTicks;
         double startZ = liftBall == BallType.POLLEN ? FeederCfg.LIFT_START_Z_POLLEN : FeederCfg.LIFT_START_Z_NECTAR;
-        if (ticks == 0) return String.format("Subió ~%.0f mm (estimado; el encoder no contó)", liftTravelMm);
-        double mm = ticks * FeederCfg.ELEVATOR_MM_PER_TICK;
-        return String.format("Subió ~%.0f mm (estimado), %d cuentas = %.1f mm: centro en z ≈ %.1f",
-                liftTravelMm, ticks, mm, startZ + mm);
+        String v3 = liftSeen ? String.format(" V3 al parar: %.1f mm (mínimo %.1f).", liftLastAvgMm, liftMinMm) : "";
+        if (ticks == 0) return String.format("Subió ~%.0f mm (estimado; el encoder no contó).%s", liftTravelMm, v3);
+        double mm = ticks * ballMmPerTick();
+        return String.format("Subió ~%.0f mm (estimado), %d cuentas = %.1f mm: centro en z ≈ %.1f.%s",
+                liftTravelMm, ticks, mm, startZ + mm, v3);
     }
 
     /** Agrega una distancia viéndola y regresa el promedio de las últimas LIFT_AVG_SAMPLES. */
@@ -629,7 +638,7 @@ public class Feeder {
             liftTravelMm = 0;
             liftPower = 0;
             liftStartTicks = elevator.getCurrentPosition();
-            liftFirstMm = liftMinMm = Double.NaN;
+            liftFirstMm = liftMinMm = liftLastAvgMm = Double.NaN;
         }
         // Mientras sube la pelota, el V3 de arriba se lee más seguido (fin de LIFT)
         upperSensor.setMinIntervalS(s == State.LIFT ? FeederCfg.LIFT_READ_INTERVAL_S : Double.NaN);
