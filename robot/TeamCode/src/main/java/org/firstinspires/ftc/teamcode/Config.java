@@ -8,10 +8,17 @@ import org.firstinspires.ftc.teamcode.util.ColorClassifier;
  * TODOS los números que se ajustan en el robot viven aquí.
  *
  * Etiquetas:
- *  - CAD: sale del CAD "Robot BIOBUZZ 2027 torreta centrada" v99 o de su registro.
+ *  - CAD: sale del CAD "Robot BIOBUZZ 2027 torreta centrada" (v99 a v145) o de su registro.
  *  - CALC: calculado (fichas de goBILDA/REV, manual TU09). No medido.
  *  - MEDIR / CALIBRAR: de relleno. El código corre con ellos, pero el robot no va a
  *    funcionar bien hasta poner el valor real. Los OpModes "Tune: ..." sirven para eso.
+ *
+ * Sentido de los servos goBILDA serie 2000: las fichas dicen "Clockwise" al subir el PWM
+ * sin decir desde qué lado. Todo el CALC de aquí lo supone VISTO DESDE EL ESTRIADO (como la
+ * copa y el gap). Se confirma en el banco con un servo suelto (README, pruebas en el robot,
+ * paso 1); si sale al revés se voltean JUNTOS: SERVO_INVERTED de la torreta, GAP_NECTAR_US
+ * (1500 + 36.1/0.15), ANGLE_US_PER_DEG (+6.667), los µs de la lengua (1998/1484/1002),
+ * FILA_POWER_IN (-1) y el armado de la copa (calar con el aro en el piso a ~640 µs).
  *
  * Nada de este archivo se ha medido en el robot físico.
  */
@@ -31,8 +38,8 @@ public final class Config {
         public static final String LIMELIGHT = "limelight";
         public static final String INTAKE_CAMERA = "c270";           // opcional
         public static final String IMU = "imu";
-        public static final String COLOR_UPPER = "colorArriba";       // V3 de z 126
-        public static final String COLOR_COPA = "colorCopa";          // V3 de z 50
+        public static final String COLOR_UPPER = "colorArriba";       // V3 de z 128
+        public static final String COLOR_COPA = "colorCopa";          // V3 de z 52
         public static final String COLOR_THROAT = "colorGarganta";    // V3 de la entrada de la fila
         public static final String BEAM_MOUTH = "bbBoca";             // BB1
         public static final String BEAM_THROAT = "bbGarganta";
@@ -188,35 +195,51 @@ public final class Config {
     public static final class HoodCfg {
         /**
          * CAD: gap del eslabón para cada pelota (POLLEN 63.0 mm de luz, NECTAR 79.7 mm). El gap
-         * sí tiene tope: el perno corre en una ranura que lo para ~0.9° después de 0 y de -34.3.
+         * tiene topes: el hombro Ø8 del perno corre en una ranura de 9.0 mm que lo para 0.91°
+         * más allá de cada extremo, en +0.91° y -35.18° (CAD v77). Los µs se toman EN LOS
+         * TOPES, así que entre ellos el eslabón gira 34.27 + 2 x 0.91 = 36.1°, y esa es la
+         * compensación que tiene que hacer el servo de ángulo.
+         * GAP_NECTAR_DEG: CALC de arranque -36.1; se CALIBRA en "Tune: Hood" (paso 6) hasta que
+         * en NECTAR con δ 0 la luz en la punta sea igual a la del labio (~80 mm).
          */
         public static double GAP_POLLEN_DEG = 0.0;
-        public static double GAP_NECTAR_DEG = -34.3;
+        public static double GAP_NECTAR_DEG = -36.1;
 
         /**
-         * CALIBRAR con "Tune: Hood": µs del servo de gap en cada tope. CALC de relleno con
-         * 0.15°/µs (servo 2000-0025-0002: 300° de 500 a 2500 µs). En NECTAR lo toma el tope
-         * duro: ponerlo justo donde llega sin forzar.
+         * CALIBRAR con "Tune: Hood": µs del servo de gap en cada tope, sin forzar. CALC de
+         * relleno con 0.15°/µs (servo 2000-0025-0002: 300° de 500 a 2500 µs).
          */
         public static double GAP_POLLEN_US = 1500;
-        public static double GAP_NECTAR_US = 1500 - 34.3 / 0.15;
+        public static double GAP_NECTAR_US = 1500 - 36.1 / 0.15;
 
         /**
-         * CALIBRAR: µs del servo de ángulo con el hood en δ = 0 y gap de POLLEN, y µs por
-         * grado (signo según cómo quedó montado). CALC: 1 / 0.15 = 6.67 µs por grado.
+         * CALIBRAR: µs del servo de ángulo con el hood en δ = 0 y el eslabón en su tope de
+         * POLLEN, y µs por grado de δ. CALC: 1 / 0.15 = 6.67 µs por grado, con el signo
+         * CONTRARIO al del gap: en el CAD el servo de gap tiene el estriado hacia -X y el de
+         * ángulo hacia +X, y las dos juntas giran sobre +X (inventario v136). Con el mismo
+         * signo, al ir a NECTAR la lámina gira ~69° y choca con la carcasa de la Limelight.
+         * "Tune: Hood" lo confirma (paso 3): con δ +10 la PUNTA de la lámina BAJA hacia el
+         * flywheel.
          */
         public static double ANGLE_ZERO_US = 1500;
-        public static double ANGLE_US_PER_DEG = 1.0 / 0.15;
+        public static double ANGLE_US_PER_DEG = -1.0 / 0.15;
 
-        /** CAD: el servo de ángulo, relativo al eslabón, va de -10° a +44.3° (setPwmRange = último tope). */
-        public static double ANGLE_MIN_DEG = -10.0;
-        public static double ANGLE_MAX_DEG = 44.3;
+        /**
+         * CAD: true = los dos servos montados al revés uno del otro, como en el CAD: sus µs por
+         * grado tienen que ir con signo contrario, y si no, el hood no va a NECTAR (seguro).
+         * Solo se cambia si el armado real difiere del CAD (por ejemplo, el de ángulo
+         * volteado), y se deja escrito aquí: entonces van del mismo signo.
+         */
+        public static boolean SERVOS_FACE_OPPOSITE = true;
 
         /**
          * CAD v104: δ NO tiene topes físicos (los ±10.5° son solo límites de la junta).
+         * δ positivo CIERRA: la punta de la lámina baja hacia el flywheel.
          * La lámina toca la Limelight en δ -30.8° (POLLEN), -24.9° (gap a la mitad) o
          * -18.3° (NECTAR), y las FlatTop en +35.4°, +40.1° o +44.5°. Envolvente segura y
-         * rango de uso:
+         * rango de uso (el recorrido del servo de ángulo sale de aquí y de los gaps: de
+         * -GAP_POLLEN_DEG + DELTA_SAFE_MIN_DEG a -GAP_NECTAR_DEG + DELTA_SAFE_MAX_DEG, hoy
+         * -10° a +46.1°; ver Hood.angleMinDeg()):
          */
         public static double DELTA_SAFE_MIN_DEG = -10.0;
         public static double DELTA_SAFE_MAX_DEG = 10.0;
@@ -230,7 +253,7 @@ public final class Config {
          *  - con -5°, el servo de gap se puede adelantar hasta 13° antes de tocar la Limelight
          *    (NECTAR, -18.3°);
          *  - si el servo de gap no se mueve (cable suelto), al ir a NECTAR δ queda en
-         *    34.3 - 5 = 29.3°: 6° antes de las FlatTop.
+         *    36.1 - 5 = 31.1°: 4.3° antes de las FlatTop (+35.4° en POLLEN).
          */
         public static double TRANSIT_DELTA_DEG = -5.0;
 
@@ -267,8 +290,21 @@ public final class Config {
         /** Diferencia de rpm permitida para decir que ya está en velocidad. */
         public static double RPM_TOLERANCE = 75;
 
-        /** CALIBRAR: caída de rpm que confirma que una pelota pasó. */
+        /**
+         * MEDIR antes de confiar en él: caída de rpm que confirma que una pelota pasó. CALC
+         * (inercia del flywheel y energía de la pelota, sin pérdidas por apriete): como mínimo
+         * 60-100 rpm con POLLEN y 120-190 con NECTAR. Con 250 puede que ningún tiro se confirme
+         * y el alimentador se quede en "tiro sin confirmar" (no rellena hasta B del gamepad 2).
+         * "Tune: Tiro" muestra la caída de cada tiro: poner esto abajo de la más chica medida.
+         */
         public static double SHOT_DIP_RPM = 250;
+
+        /**
+         * Si la consigna cambió más que esto desde que estuvo en velocidad (la tabla pidió otras
+         * rpm), una caída no se cuenta como tiro. Antes era SHOT_DIP_RPM / 2: así bajar el
+         * umbral no achica esta tolerancia.
+         */
+        public static double DIP_TARGET_TOL_RPM = 125;
     }
 
     public static final class ShotCfg {
@@ -349,6 +385,48 @@ public final class Config {
         public static double FIRE_TIMEOUT_S = 1.0;
         public static double LIFT_TIMEOUT_S = 1.5;
 
+        /*
+         * Fin de LIFT (documento del CAD v138, 4.7). El V3 de arriba (lente en z 128) ve la
+         * pelota ANTES de que llegue a su etapa: la distancia baja hasta un mínimo con el centro
+         * de la pelota a la altura del lente y vuelve a subir. La pelota tiene que quedar con el
+         * centro entre z 144.8 (para no tocar una NECTAR en la copa) y el contacto con el
+         * flywheel (NECTAR 156.5, POLLEN 170.8): 11.7 mm con NECTAR sobre NECTAR. Por eso, ya
+         * vista, sube despacio, se espera a que la distancia suba LIFT_PASS_MM sobre su mínimo
+         * (el centro ya pasó el lente) y se sigue LIFT_EXTRA_MM más. Mientras tanto el V3 de
+         * arriba se lee en cada ciclo. Todo CALC de relleno: se mide en "Tune: Alimentador". Si
+         * en el robot no se puede dejar dentro de esa ventana, avisar al CAD (límite mecánico).
+         */
+        /** CALIBRAR: potencia del elevador ya que el V3 de arriba vio la pelota. */
+        public static double LIFT_SEAT_POWER = 0.10;
+        /** CALC sin carga: 1150 rpm x 0.10 en Gecko de 32 mm ≈ 190 mm/s. MEDIR con pelota. */
+        public static double LIFT_SEAT_MM_S = 190;
+        /** CALIBRAR: subida sobre el mínimo que dice que el centro ya pasó el lente (CALC: con 1 mm, ~10 mm arriba). */
+        public static double LIFT_PASS_MM = 1.0;
+        /**
+         * CALC → CALIBRAR. Se cuenta desde que se nota la subida, no desde z 128: el documento
+         * del CAD pide ~17 mm desde el lente (hasta z ~145) y la subida se nota ~10 mm arriba.
+         */
+        public static double LIFT_EXTRA_MM = 8;
+        /** Cada cuánto se lee el V3 de arriba mientras sube la pelota (0 = cada ciclo). */
+        public static double LIFT_READ_INTERVAL_S = 0.0;
+
+        /**
+         * MEDIR en "Tune: Alimentador": altura de la copa hasta la que el V3 de arriba todavía
+         * no ve la pelota de la copa. Al subir la copa solo se aborta si el V3 de arriba ve algo
+         * con la copa debajo de esto: más arriba lo que ve puede ser la pelota que va subiendo
+         * (NECTAR a 12.5 mm con la copa arriba). "Hay pelota arriba" se decide antes de subir,
+         * con la copa abajo. Arranque: 10 mm (CALC: con la copa abajo la NECTAR queda a 54° del
+         * eje del V3; con la copa a 27 mm, a 41°).
+         */
+        public static double COPA_UPPER_BLIND_MM = 10;
+
+        /**
+         * CALC → CALIBRAR: con la copa ocupada la fila se detiene en el primer corte de BB3, con
+         * la 3a a 28-33 mm de su lugar del CAD (y -112). Sigue esto más para asentarla
+         * (~0.23 m/s). 0 = no.
+         */
+        public static double FILA_SEAT_S = 0.12;
+
         /**
          * Una caída de rpm cuando la pelota todavía se ve arriba más de esto después no es el
          * tiro (golpe, cambio de consigna): se descarta.
@@ -376,42 +454,72 @@ public final class Config {
     }
 
     /**
-     * Intake de la lengua de bandas con dedos colgantes (CAD, 18-nov; sustituye a F2, que salió
-     * del CAD en la v106; la lengua todavía no está modelada). M_F mueve las bandas y los 4
-     * dedos; un servo 2000-0025-0002 con manivela y biela despliega la lengua.
+     * Intake de la lengua de bandas con dedos colgantes (CAD v107-v118, revisada en la
+     * v138-v139; sustituye a F2, que salió en la v106). M_F mueve las bandas y los 4 dedos; un
+     * servo 2000-0025-0002 con manivela de r 16 y biela con ranura despliega la lengua.
      */
     public static final class IntakeLenguaCfg {
-        /** CAD: + = jalar (las bandas no invierten el giro). CONFIRMAR en el robot. */
+        /**
+         * + = jalar, como SUPUESTO: el CAD no da el signo del motor (depende de su polaridad y
+         * del par de ingletes). CONFIRMAR en "Tune: Lengua": el tramo de abajo de las bandas
+         * tiene que jalar hacia adentro (+Y).
+         */
         public static boolean REVERSED = false;
-        /** CAD: al 100 % las bandas van a ~1.5 m/s sin carga. */
+        /** CALC: al 100 % la cadena de M_F lleva los dedos a ~1.53 m/s sin carga. */
         public static double IN_POWER = 1.0;
 
         /**
-         * PENDIENTE: los µs llegan con el documento del CAD v138 (el sentido del PWM todavía no
-         * está verificado). Mientras, las tres posiciones valen lo mismo y el servo no se mueve.
-         * 0.15°/µs; 1500 µs = centro.
-         *  - Plegada (inicio): recargada por su peso en el tope de atrás; PWM apagado.
-         *  - Empuje: de plegada a aquí la lengua no se mueve (el perno corre en la ranura de la
-         *    biela); desde aquí la biela empieza a empujarla.
-         *  - Abajo: en el tope duro de abajo; PWM prendido (por ahora, CAD).
-         * Con 4 pelotas (G407) se queda ABAJO con M_F en BRAKE: subirla empujaría la 4a contra
-         * la flecha del pivote de la fila (CAD v106; Adrián lo confirmó el 19-nov).
+         * SEGURO (documento del CAD v138, 4.3): mientras sea false, el TeleOp NO mueve el servo
+         * de la lengua ni M_F (en INIT avisa que se pliegue a mano). Solo "Tune: Lengua" los
+         * mueve. Se pone en true después de calibrar con "Tune: Lengua" y copiar los µs aquí.
+         * Con los µs de cálculo no basta: el calado del estriado puede quedar hasta ±48 µs
+         * (medio diente) fuera, más que los 36 µs que hay entre plegada y el punto en que el
+         * servo jala la lengua contra su tope cerca del punto muerto de la biela.
          */
-        public static double FOLDED_US = 1500;
-        public static double PUSH_US = 1500;
-        public static double DOWN_US = 1500;
+        public static boolean CALIBRATED = false;
+
         /**
-         * Velocidad que se SUPONE del servo para decir "ya llegó" (no da su posición). CAD: 0.25 s
-         * por 60° sin carga (240°/s) y la carga es chica; aquí, pesimista. MEDIR.
+         * CALC → CALIBRAR con "Tune: Lengua" (documento del CAD v138, 4.3). µs del servo, con
+         * µs = 1500 - (ψ + 48.15) / 0.15: ψ es el ángulo de la manivela desde +Y (atrás) hacia
+         * +Z (arriba), visto desde +X, y el estriado mira a +X; con la ficha vista desde el
+         * estriado, más PWM = horario = ψ baja (la convención de la copa y del gap).
+         *  - Plegada (inicio), ψ +26.5°: recargada por su peso en el tope de atrás; PWM apagado.
+         *  - Empuje, ψ -50.5°: de plegada a aquí la manivela gira 77° y la lengua no se mueve
+         *    (el perno corre en la ranura de la biela); desde aquí la biela la empuja.
+         *  - Abajo, ψ -122.8°: la lengua se apoya en su tope por su peso (la ranura deja 1.11
+         *    mm: el servo no la carga). PWM prendido.
+         * Si el banco da el sentido al revés, se reflejan alrededor de 1500: 1998 / 1484 / 1002.
+         * Con 4 pelotas (G407) se queda ABAJO con M_F en BRAKE: subirla empujaría la 4a contra
+         * la flecha del pivote de la fila (Adrián lo decidió el 19-nov).
+         */
+        public static double FOLDED_US = 1002;
+        public static double PUSH_US = 1516;
+        public static double DOWN_US = 1998;
+        /** CAD: el estriado se cala con la manivela a medio camino, ψ -48.15°, recibiendo esto. */
+        public static double SPLINE_SET_US = 1500;
+        /**
+         * Velocidad que se SUPONE del servo para decir "ya llegó" (no da su posición). Ficha:
+         * 240°/s sin carga a 4.8 V; aquí, pesimista. MEDIR cronometrando en "Tune: Lengua".
          */
         public static double SERVO_DEG_S = 200;
         /**
-         * CAD v139: de empuje a abajo, rampa de 120°/s como máximo. Al pasar la vertical la lengua
-         * cae por su peso; con la rampa, la manivela va bajando y la lengua la alcanza sin golpe.
+         * Plan de la lengua del CAD (plan_lengua_final.json, A/decisiones[11]): de empuje a
+         * abajo, rampa de 120°/s como máximo. Al pasar la vertical la lengua cae por su peso;
+         * con la rampa, la manivela va bajando y la lengua la alcanza sin golpe (quieta, serían
+         * ~35° de caída libre).
          */
         public static double DEPLOY_RAMP_DEG_S = 120;
         /** Ya en su lugar, este tiempo más antes de darla por quieta. */
         public static double SETTLE_S = 0.1;
+
+        /**
+         * CALC (plan de la lengua, E/problemas[10]): límite de corriente de M_F, ≈0.42 N·m con
+         * el 5203-2402-0005 (9.2 A y 0.775 N·m en paro). Con M_F en paro, el balero del cubo de
+         * Q llega a su capacidad estática y el servo de la lengua ve hasta 64 % de su paro.
+         */
+        public static double MF_CURRENT_LIMIT_A = 5.0;
+        /** CALIBRAR: arriba del límite este tiempo seguido y M_F se detiene (BRAKE) y avisa. */
+        public static double MF_OVERCURRENT_S = 0.2;
 
         /** Atasco (la misma regla que tenía F2, CAD): BB1 más de esto sin que la garganta cuente. */
         public static double UNJAM_MOUTH_S = 0.25;
@@ -420,25 +528,44 @@ public final class Config {
         public static double UNJAM_MAX_MS = 100;
 
         /**
+         * CALIBRAR (documento del CAD v138, 4.5). Con arriba, copa y fila ocupadas, la 4a se
+         * queda en la boca sin cortar el haz de la garganta (le faltan 7-24 mm) y corta BB1:
+         * una pelota en BB1 de forma continua esto es la 4a y el robot está LLENO. Tiene que
+         * ser menor que UNJAM_MOUTH_S (con las 3 etapas ocupadas, además, BB1 no es atasco).
+         */
+        public static double FULL_MOUTH_S = 0.2;
+
+        /**
          * G408: reversa de M_F y de la fila con la lengua ABAJO (plegada, los dedos no tocan la
-         * pelota). CAD: de la garganta a pasar F son ~0.1-0.2 s; se empieza con los de F2.
+         * pelota). Las reglas de F2 (el plan de la lengua no las redefine). CALC: una rival
+         * regresa 135-180 mm, del V3 de la garganta a pasar el primer toque de los dedos: ~0.1-
+         * 0.14 s a la velocidad de las bandas, ~0.18-0.27 s si rueda. CALIBRAR.
          */
         public static double REJECT_S = 0.4;
         public static double REJECT_MAX_S = 1.5;
     }
 
     /**
-     * Cámara C270 que busca NECTAR rival frente al intake. CAD (llega en la tanda T11): se
-     * mueve a la esquina +X, lente en (x 178, y -220, z 160) mm, 15° hacia abajo y 10° hacia
-     * -X. NO calibrar con la pose vieja de la visera de F2.
+     * Cámara C270 que busca NECTAR rival frente al intake (CAD v116-v127, esquina +X). Su
+     * pose del CAD, (x 178, y -220, z 160) mm con 15° hacia abajo y 10° hacia -X, es el
+     * centro de la CARA de una caja provisional: el lente real queda a ~17 mm de lado y la
+     * cámara real apuntaría 2-3.8° más arriba. Falta medirla (fondo, lado del lente, cuña del
+     * asiento y FOV de 55 o 60°). NO calibrar con la pose vieja de la visera de F2.
      */
     public static final class IntakeCameraCfg {
         public static int WIDTH_PX = 320;
         public static int HEIGHT_PX = 240;
-        /** Solo la mitad de abajo de la imagen (el piso cerca del intake). */
+        /**
+         * Solo la mitad de abajo de la imagen (el piso cerca del intake). CALC: ve centros de
+         * NECTAR de y ≈ -380 a -670 y, cerca del robot, solo la mitad +X de la boca. Después de
+         * medir la cámara conviene usar el cuadro completo y quedarse con la zona de la boca.
+         */
         public static double ROI_TOP = 0.0;
-        /** CALIBRAR: a 320x240, una NECTAR a ~60 cm mide ~400 px de área. */
-        public static double MIN_AREA_PX = 400;
+        /**
+         * CALC → CALIBRAR: a 320x240 una NECTAR a 60 cm mide ~2,200-2,700 px² (FOV de 60° a
+         * 55°); 400 px² sería una a ~1.5 m.
+         */
+        public static double MIN_AREA_PX = 2500;
         public static double MAX_AREA_PX = 40000;
         public static double MIN_CIRCULARITY = 0.6;
         /** Vista en vivo en la Driver Station: útil para calibrar, apagada en competencia. */
@@ -458,14 +585,22 @@ public final class Config {
         public static double COLOR_MIN_INTERVAL_S = 0.04;
 
         /**
+         * El V3 de arriba mide distancia cada 12.5 ms (los otros cada 25): el fin de LIFT depende
+         * de notar pronto que la pelota ya pasó el lente (FeederCfg.LIFT_*).
+         */
+        public static boolean UPPER_FAST_PROXIMITY = true;
+
+        /**
          * CALIBRAR con "Test: Sensores". {presente a menos de mm, NECTAR a menos de mm (NaN =
          * no usar el tamaño), saturación mínima, brillo mínimo}.
-         * CAD: en la copa, NECTAR a 4.6 mm y POLLEN a 16.1 mm; en la garganta, NECTAR a ~9 mm
-         * y POLLEN a 19-33 mm.
+         * CALC (CAD v131): en la copa, NECTAR a 4.5 mm y POLLEN a 16.2 mm en el aro. En la
+         * garganta el tamaño no separa una de otra (paredes de la fila en x ±49): NECTAR de 8.3
+         * a 14.1 mm y POLLEN de 6.3 a 33.1 mm según de qué lado vaya; ahí G408 depende solo del
+         * color. Arriba: lo que lea fuera del eje (la pelota de la copa subiendo) hay que MEDIRLO.
          */
         public static ColorClassifier.Thresholds UPPER = new ColorClassifier.Thresholds(50, Double.NaN, 0.25, 0.02);
         public static ColorClassifier.Thresholds COPA = new ColorClassifier.Thresholds(35, 10, 0.25, 0.02);
-        public static ColorClassifier.Thresholds THROAT = new ColorClassifier.Thresholds(45, 14, 0.25, 0.02);
+        public static ColorClassifier.Thresholds THROAT = new ColorClassifier.Thresholds(45, Double.NaN, 0.25, 0.02);
     }
 
     public static final class DriveCfg {
