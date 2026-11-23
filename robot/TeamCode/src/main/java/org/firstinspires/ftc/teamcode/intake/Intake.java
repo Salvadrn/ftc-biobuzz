@@ -35,12 +35,14 @@ public interface Intake {
      * @param filaAccepting la fila está jalando hacia adentro: si no (ocupada, o la copa
      *                      ocupada o moviéndose), una pelota en la entrada ESPERA, no está
      *                      atorada (documento del CAD v138, 4.5)
+     * @param filaHasBall   hay pelota en la fila (BB3): entonces lo que corta la garganta
+     *                      puede ser esa misma (una NECTAR sin asentar), no una que espera
      */
-    void update(long nowNs, boolean robotFull, boolean filaAccepting);
+    void update(long nowNs, boolean robotFull, boolean filaAccepting, boolean filaHasBall);
 
-    /** Sin saber cómo va el alimentador (pruebas): como si la fila siempre jalara. */
+    /** Sin saber cómo va el alimentador (pruebas): como si la fila siempre jalara y estuviera vacía. */
     default void update(long nowNs, boolean robotFull) {
-        update(nowNs, robotFull, true);
+        update(nowNs, robotFull, true, false);
     }
 
     /** Está metiendo pelotas: el alimentador puede jalar la siguiente a la fila. */
@@ -62,9 +64,8 @@ public interface Intake {
     boolean hasBallAtThroat();
 
     /**
-     * ¿Hay una pelota esperando en la entrada (garganta, o la boca de forma continua)? Con las
-     * 3 etapas ocupadas, esa es la 4a: el robot está lleno aunque no haya cortado la garganta
-     * (documento del CAD v138, 4.5).
+     * ¿Hay una pelota esperando en la entrada? Con las 3 etapas ocupadas, esa es la 4a: el
+     * robot está lleno aunque no haya cortado la garganta (documento del CAD v138, 4.5).
      */
     default boolean hasBallAtEntry() { return hasBallAtThroat(); }
 
