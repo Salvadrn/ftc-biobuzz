@@ -89,9 +89,12 @@ public class Flywheel {
      * Se marca si, habiendo estado en velocidad hace poco, cae más de SHOT_DIP_RPM debajo
      * de la consigna de ese momento. Si la consigna cambió más de DIP_TARGET_TOL_RPM desde
      * entonces (la tabla pidió otras rpm), no se cuenta: subir la consigna no es un tiro.
+     * Solo se vuelve a armar ya recuperada (a menos de SHOT_DIP_RPM / 2 de la consigna): con un
+     * umbral menor que RPM_TOLERANCE, la rueda todavía "en velocidad" a media caída o subiendo
+     * de regreso contaría el mismo tiro dos veces.
      */
     private void trackDip(long nowNs) {
-        if (isAtSpeed()) {
+        if (isAtSpeed() && rpm > targetRpm - FlywheelCfg.SHOT_DIP_RPM / 2) {
             lastAtSpeedNs = nowNs;
             targetAtSpeed = targetRpm;
         }
